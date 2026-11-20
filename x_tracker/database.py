@@ -197,9 +197,9 @@ class Database:
         display_name: str = "",
         avatar_url: str = "",
         bio: str = "",
-        followers_count: int = 0,
-        following_count: int = 0,
-        total_posts: int = 0,
+        followers_count: int | None = None,
+        following_count: int | None = None,
+        total_posts: int | None = None,
         created_at: str | None = None,
         last_synced_at: str | None = None,
     ) -> dict[str, Any]:

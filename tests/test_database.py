@@ -78,6 +78,12 @@ def test_account_upsert_and_profile_snapshot_deltas(tmp_path: Path) -> None:
     assert len(snapshots) == 2
     assert snapshots[1]["followers_count"] == 1145
 
+    # Updating only last_synced_at must preserve existing follower/post counts
+    updated = db.upsert_account(handle="alexrivera_dev", last_synced_at="2026-11-20T12:00:00Z")
+    assert updated["followers_count"] == 1145
+    assert updated["following_count"] == 253
+    assert updated["total_posts"] == 42
+
 
 def test_post_upsert_and_snapshot_views_delta_and_velocity(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
