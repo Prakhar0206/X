@@ -3,338 +3,467 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>X Telemetry — Local-First X Analytics &amp; Impression Tracker</title>
+  <title>X Telemetry — Local Impression Tracker</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230284C7'/%3E%3Cstop offset='100%25' stop-color='%2338BDF8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M9 8h4.2l3.8 5.4L21.6 8H24l-5.7 6.8L24.5 24h-4.2l-4.2-6-4.9 6H8.8l6-7.2L9 8z' fill='%2306131F'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=4" />
+  <link rel="stylesheet" href="/static/styles.css?v=5" />
 </head>
 <body class="telemetry-body">
-  <!-- Top Sticky Control Bar -->
-  <header class="control-bar" role="banner">
-    <div class="control-bar-inner">
-      <div class="brand-cluster">
+  <div class="app-shell">
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden" aria-hidden="true"></div>
+
+    <!-- Left Navigation & Handle Management Sidebar -->
+    <aside id="sidebar" class="sidebar" aria-label="Workspace navigation">
+      <div class="sidebar-brand">
         <div class="brand-mark" aria-hidden="true">𝕏</div>
-        <div>
+        <div class="brand-copy">
           <h1 class="brand-title">X Telemetry</h1>
-          <span class="brand-sub">Local SQLite Impression Tracker</span>
+          <span class="brand-sub">Local Impression Tracker</span>
         </div>
       </div>
 
-      <div class="controls-cluster">
-        <!-- Inline Add / Switch / Remove Handle -->
-        <div class="handle-group">
+      <div class="sidebar-body">
+        <!-- View Navigation -->
+        <nav class="sidebar-section" aria-label="Dashboard views">
+          <div class="sidebar-section-label">Views</div>
+          <div class="sidebar-nav-list">
+            <button type="button" class="nav-btn active" data-view="all">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" />
+              </svg>
+              <span>Dashboard</span>
+            </button>
+            <button type="button" class="nav-btn" data-view="overview">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 17l6-6 4 4 8-8" />
+                <path d="M17 7h4v4" />
+              </svg>
+              <span>Overview &amp; KPIs</span>
+            </button>
+            <button type="button" class="nav-btn" data-view="analytics">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 20V10" />
+                <path d="M10 20V4" />
+                <path d="M16 20v-7" />
+                <path d="M22 20v-4" />
+              </svg>
+              <span>Charts &amp; Timing</span>
+            </button>
+            <button type="button" class="nav-btn" data-view="posts">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 6h13" />
+                <path d="M8 12h13" />
+                <path d="M8 18h13" />
+                <path d="M3 6h.01" />
+                <path d="M3 12h.01" />
+                <path d="M3 18h.01" />
+              </svg>
+              <span>Posts Explorer</span>
+            </button>
+          </div>
+        </nav>
+
+        <!-- Tracked Handles Management -->
+        <section class="sidebar-section handles-section" aria-label="Tracked handles">
+          <div class="sidebar-section-label">Tracked Handles</div>
+
           <form id="inline-add-form" class="inline-add-form">
-            <label for="inline-handle-input" class="sr-only">Add X Handle or Post URL</label>
-            <input id="inline-handle-input" type="text" class="telemetry-input-handle" placeholder="Add @handle or X URL..." required />
-            <button id="btn-add-handle" type="submit" class="btn-primary">+ Add</button>
+            <label for="inline-handle-input" class="sr-only">Add X handle or post URL</label>
+            <input
+              id="inline-handle-input"
+              type="text"
+              class="sidebar-input"
+              placeholder="@handle or X post URL..."
+              autocomplete="off"
+              required
+            />
+            <button id="btn-add-handle" type="submit" class="btn-primary btn-full">+ Add Handle</button>
           </form>
+
+          <div id="handle-chips-bar" class="handle-chips-bar hidden" aria-label="Tracked handles"></div>
+
           <div class="handle-switch-group">
-            <label for="handle-select" class="sr-only">Tracked Handle</label>
-            <select id="handle-select" class="telemetry-select" aria-label="Tracked X handle"></select>
-            <button id="btn-remove-handle" type="button" class="btn-danger-ghost" title="Remove active handle">
-              Remove
+            <label for="handle-select" class="sr-only">Active tracked handle</label>
+            <select id="handle-select" class="telemetry-select sidebar-select" aria-label="Tracked X handle"></select>
+            <button id="btn-remove-handle" type="button" class="btn-danger-ghost btn-full" title="Remove active handle">
+              Remove active handle
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- Data Tools Pinned at Bottom -->
+      <div class="sidebar-footer">
+        <div class="sidebar-section-label">Data Tools</div>
+        <input type="file" id="import-file-input" accept=".csv,.json,.js" class="hidden" />
+        <button id="btn-import" type="button" class="btn-ghost btn-full">
+          <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M5 20h14" />
+          </svg>
+          <span>Import CSV / JSON</span>
+        </button>
+        <div class="sidebar-export-row">
+          <button id="btn-export-csv" type="button" class="btn-ghost btn-compact">Export CSV</button>
+          <button id="btn-export-json" type="button" class="btn-ghost btn-compact">Export JSON</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace Column -->
+    <div class="workspace-shell">
+      <!-- Single-Row Sticky Top Toolbar -->
+      <header class="top-toolbar" role="banner">
+        <div class="top-toolbar-row">
+          <div class="toolbar-left">
+            <button id="btn-mobile-menu" type="button" class="btn-mobile-menu" aria-label="Open navigation menu" aria-controls="sidebar" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M4 7h16" />
+                <path d="M4 12h16" />
+                <path d="M4 17h16" />
+              </svg>
+            </button>
+
+            <span id="active-view-title" class="toolbar-view-title">Dashboard</span>
+
+            <!-- Cohort vs Velocity Toggle -->
+            <div class="segmented-group" role="group" aria-label="Analysis Mode">
+              <button type="button" class="seg-btn active" data-mode="cohort" id="mode-cohort" title="Aggregate posts published within the selected window">
+                Cohort
+              </button>
+              <button type="button" class="seg-btn" data-mode="velocity" id="mode-velocity" title="Track new impressions and followers gained during the window">
+                Velocity
+              </button>
+            </div>
+          </div>
+
+          <div class="toolbar-right">
+            <!-- Timeframe Pills -->
+            <div class="segmented-group tf-group" role="group" aria-label="Timeframe">
+              <button type="button" class="seg-btn" data-tf="7d">7D</button>
+              <button type="button" class="seg-btn active" data-tf="30d">30D</button>
+              <button type="button" class="seg-btn" data-tf="7w">7W</button>
+              <button type="button" class="seg-btn" data-tf="90d">90D</button>
+              <button type="button" class="seg-btn" data-tf="lifetime">Lifetime</button>
+              <button type="button" class="seg-btn" data-tf="custom">Custom</button>
+            </div>
+
+            <button id="btn-sync-now" type="button" class="btn-primary btn-sync">
+              <span class="sync-dot" aria-hidden="true"></span>
+              <span id="sync-btn-label">Sync Now</span>
             </button>
           </div>
         </div>
 
-        <!-- Cohort vs Velocity Toggle -->
-        <div class="segmented-group" role="group" aria-label="Analysis Mode">
-          <button type="button" class="seg-btn active" data-mode="cohort" id="mode-cohort" title="Aggregate posts published within the selected window">
-            Cohort
-          </button>
-          <button type="button" class="seg-btn" data-mode="velocity" id="mode-velocity" title="Track new impressions and followers gained during the window">
-            Velocity
-          </button>
-        </div>
-
-        <!-- Timeframe Pills -->
-        <div class="segmented-group" role="group" aria-label="Timeframe">
-          <button type="button" class="seg-btn" data-tf="7d">7D</button>
-          <button type="button" class="seg-btn active" data-tf="30d">30D</button>
-          <button type="button" class="seg-btn" data-tf="7w">7W</button>
-          <button type="button" class="seg-btn" data-tf="90d">90D</button>
-          <button type="button" class="seg-btn" data-tf="lifetime">Lifetime</button>
-          <button type="button" class="seg-btn" data-tf="custom">Custom</button>
-        </div>
-
+        <!-- Collapsible Custom Date Range Strip -->
         <div id="custom-date-bar" class="custom-date-bar hidden">
-          <input type="date" id="custom-start" class="telemetry-input-sm" aria-label="Custom start date" />
-          <span class="date-sep">to</span>
-          <input type="date" id="custom-end" class="telemetry-input-sm" aria-label="Custom end date" />
-          <button type="button" id="btn-apply-custom" class="btn-ghost">Apply</button>
+          <div class="custom-date-inner">
+            <span class="custom-date-label">Custom range</span>
+            <input type="date" id="custom-start" class="telemetry-input-sm" aria-label="Custom start date" />
+            <span class="date-sep">to</span>
+            <input type="date" id="custom-end" class="telemetry-input-sm" aria-label="Custom end date" />
+            <button type="button" id="btn-apply-custom" class="btn-ghost btn-sm">Apply range</button>
+          </div>
         </div>
-      </div>
 
-      <div class="actions-cluster">
-        <button id="btn-sync-now" type="button" class="btn-primary">
-          <span class="sync-dot" aria-hidden="true"></span>
-          <span id="sync-btn-label">Sync Now</span>
-        </button>
-        <input type="file" id="import-file-input" accept=".csv,.json,.js" class="hidden" />
-        <button id="btn-import" type="button" class="btn-ghost">Import CSV/JSON</button>
-        <div class="export-group">
-          <button id="btn-export-csv" type="button" class="btn-ghost">Export CSV</button>
-          <button id="btn-export-json" type="button" class="btn-ghost">Export JSON</button>
+        <!-- Slim Live Sync Progress Strip -->
+        <div id="sync-progress-strip" class="sync-progress-strip hidden" aria-live="polite">
+          <div class="sync-progress-inner">
+            <div class="sync-progress-track">
+              <div id="sync-progress-fill" class="sync-progress-fill" style="width: 0%"></div>
+            </div>
+            <span id="sync-progress-text" class="sync-progress-text">Preparing sync...</span>
+          </div>
         </div>
-      </div>
+      </header>
+
+      <!-- Fluid Centered Content Area -->
+      <main class="dashboard-main">
+        <!-- Toast Notification Banner -->
+        <div id="toast-banner" class="toast-banner hidden" role="status" aria-live="polite"></div>
+
+        <!-- Empty State -->
+        <section id="empty-state" class="panel-card empty-state hidden">
+          <div class="empty-state-content">
+            <div class="empty-state-mark" aria-hidden="true">𝕏</div>
+            <h2>Track your first X handle</h2>
+            <p>
+              Enter any X handle or paste a post URL to capture local profile snapshots and impressions, or import an official X Analytics CSV or JSON export.
+            </p>
+            <form id="empty-add-form" class="empty-add-form">
+              <label for="empty-handle-input" class="sr-only">X Handle</label>
+              <input
+                id="empty-handle-input"
+                type="text"
+                class="telemetry-input"
+                placeholder="Enter @handle or post URL (e.g. @itsprakhar_)"
+                required
+              />
+              <button type="submit" class="btn-primary">Track Handle</button>
+              <button id="btn-empty-import" type="button" class="btn-ghost">Import CSV / JSON</button>
+            </form>
+          </div>
+        </section>
+
+        <!-- Active Dashboard Workspace -->
+        <div id="dashboard-content" class="dashboard-content">
+          <!-- Section 1: Overview & KPIs -->
+          <div id="section-overview" class="workspace-section">
+            <!-- Refined Profile Banner -->
+            <section class="panel-card profile-strip" aria-label="Account Overview">
+              <div class="profile-left">
+                <img id="profile-avatar" class="profile-avatar" src="" alt="" />
+                <div class="profile-meta">
+                  <div class="profile-name-row">
+                    <h2 id="profile-display-name" class="profile-display-name">—</h2>
+                    <span id="profile-handle" class="profile-handle-mono">@—</span>
+                    <span id="mode-badge" class="mode-pill">Cohort · Post-Publish Window</span>
+                  </div>
+                  <p id="profile-bio" class="profile-bio"></p>
+                </div>
+              </div>
+              <div class="profile-right">
+                <div class="mini-stat">
+                  <span class="mini-label">Window Span</span>
+                  <span id="meta-window-range" class="mini-val mono">—</span>
+                </div>
+                <div class="mini-stat">
+                  <span class="mini-label">Cohort vs Velocity</span>
+                  <span id="meta-cohort-vs-vel" class="mini-val mono">—</span>
+                </div>
+                <div class="mini-stat">
+                  <span class="mini-label">Last Synced</span>
+                  <span id="meta-last-synced" class="mini-val mono">—</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Spacious 3x2 KPI Grid -->
+            <section class="kpi-grid" aria-label="Key Performance Indicators">
+              <article class="panel-card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-title" id="kpi-imp-title">Total Impressions</span>
+                  <span id="kpi-imp-delta" class="delta-badge neutral">0.0%</span>
+                </div>
+                <div id="kpi-imp-value" class="kpi-value mono">0</div>
+                <div id="kpi-imp-sub" class="kpi-sub">Cohort vs Velocity</div>
+              </article>
+
+              <article class="panel-card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-title">Followers &amp; Velocity</span>
+                  <span id="kpi-fol-delta" class="delta-badge neutral">+0</span>
+                </div>
+                <div id="kpi-fol-value" class="kpi-value mono">0</div>
+                <div id="kpi-fol-sub" class="kpi-sub">0.0 / day net growth</div>
+              </article>
+
+              <article class="panel-card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-title">Engagement Rate</span>
+                  <span id="kpi-er-delta" class="delta-badge neutral">0.00 pts</span>
+                </div>
+                <div id="kpi-er-value" class="kpi-value mono">0.00%</div>
+                <div id="kpi-er-sub" class="kpi-sub">0 total engagements</div>
+              </article>
+
+              <article class="panel-card kpi-card kpi-accent-amber">
+                <div class="kpi-header">
+                  <span class="kpi-title">Bookmarks &amp; High-Signal</span>
+                  <span id="kpi-bm-delta" class="delta-badge neutral">0.0%</span>
+                </div>
+                <div id="kpi-bm-value" class="kpi-value mono">0</div>
+                <div id="kpi-bm-sub" class="kpi-sub">High-Signal: 0.0 / 1K views</div>
+              </article>
+
+              <article class="panel-card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-title">Bookmark / Like</span>
+                  <span id="kpi-vir-badge" class="delta-badge neutral">0.00%</span>
+                </div>
+                <div id="kpi-bl-value" class="kpi-value mono">0.0%</div>
+                <div id="kpi-bl-sub" class="kpi-sub">Virality (reposts / views)</div>
+              </article>
+
+              <article class="panel-card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-title">Posts &amp; Peak Window</span>
+                  <span id="kpi-posts-delta" class="delta-badge neutral">0.0%</span>
+                </div>
+                <div id="kpi-posts-value" class="kpi-value mono">0</div>
+                <div id="kpi-posts-sub" class="kpi-sub">Best slot: —</div>
+              </article>
+            </section>
+
+            <!-- Charts Row 1: Impressions & Engagement Over Time + Follower Growth -->
+            <section class="charts-row-2-1" aria-label="Primary performance charts">
+              <article class="panel-card chart-panel">
+                <div class="panel-header">
+                  <div class="panel-heading-group">
+                    <h3 class="panel-title">Impressions &amp; Engagement Over Time</h3>
+                    <p class="panel-sub">Views volume paired with total active engagements</p>
+                  </div>
+                  <div class="segmented-group" role="group" aria-label="Chart Aggregation Granularity">
+                    <button type="button" class="seg-btn active" data-gran="daily">Daily</button>
+                    <button type="button" class="seg-btn" data-gran="weekly">Weekly</button>
+                    <button type="button" class="seg-btn" data-gran="monthly">Monthly</button>
+                  </div>
+                </div>
+                <div class="chart-box-lg">
+                  <canvas id="chart-over-time"></canvas>
+                </div>
+              </article>
+
+              <article class="panel-card chart-panel">
+                <div class="panel-header">
+                  <div class="panel-heading-group">
+                    <h3 class="panel-title">Follower Growth Curve</h3>
+                    <p class="panel-sub">Recorded audience trajectory &amp; daily net gains</p>
+                  </div>
+                </div>
+                <div class="chart-box-lg">
+                  <canvas id="chart-followers"></canvas>
+                </div>
+              </article>
+            </section>
+          </div>
+
+          <!-- Section 2: Charts & Timing -->
+          <div id="section-analytics" class="workspace-section">
+            <!-- Charts Row 2: Posting Cadence vs Impressions + Engagement & Media Breakdown -->
+            <section class="charts-row-1-1" aria-label="Cadence and content breakdown">
+              <article class="panel-card chart-panel">
+                <div class="panel-header">
+                  <div class="panel-heading-group">
+                    <h3 class="panel-title">Posting Cadence vs. Impressions</h3>
+                    <p class="panel-sub">Dual-axis comparison of post frequency and reach</p>
+                  </div>
+                </div>
+                <div class="chart-box-md">
+                  <canvas id="chart-cadence"></canvas>
+                </div>
+              </article>
+
+              <article class="panel-card chart-panel">
+                <div class="panel-header">
+                  <div class="panel-heading-group">
+                    <h3 class="panel-title">Engagement &amp; Media Breakdown</h3>
+                    <p class="panel-sub">Interaction mix and Media vs. Text-only performance</p>
+                  </div>
+                </div>
+                <div class="breakdown-split">
+                  <div class="chart-box-sm">
+                    <canvas id="chart-engagement-breakdown"></canvas>
+                  </div>
+                  <div id="media-breakdown-list" class="media-breakdown-list"></div>
+                </div>
+              </article>
+            </section>
+
+            <!-- Best Time to Post Heatmap -->
+            <section class="panel-card chart-panel heatmap-panel" aria-label="Posting timing heatmap">
+              <div class="panel-header">
+                <div class="panel-heading-group">
+                  <h3 class="panel-title">Best Time to Post Heatmap</h3>
+                  <p class="panel-sub">Average impressions per post by Day of Week &times; Hour of Day (UTC)</p>
+                </div>
+                <span id="heatmap-best-badge" class="peak-slot-badge">Peak: —</span>
+              </div>
+
+              <div class="heatmap-meta-bar">
+                <span id="heatmap-hover-readout" class="heatmap-hover-readout mono">Hover a cell to inspect slot</span>
+                <div class="heatmap-scale" aria-hidden="true">
+                  <span>Low</span>
+                  <span class="scale-swatch s0"></span>
+                  <span class="scale-swatch s1"></span>
+                  <span class="scale-swatch s2"></span>
+                  <span class="scale-swatch s3"></span>
+                  <span class="scale-swatch s4"></span>
+                  <span>High</span>
+                </div>
+              </div>
+
+              <div id="heatmap-container" class="heatmap-container"></div>
+            </section>
+          </div>
+
+          <!-- Section 3: Posts Explorer -->
+          <div id="section-posts" class="workspace-section">
+            <section class="panel-card posts-section" aria-label="Tracked posts explorer">
+              <div class="posts-header">
+                <div class="panel-heading-group">
+                  <div class="posts-title-row">
+                    <h3 class="panel-title">Tracked Posts Explorer</h3>
+                    <span id="posts-count-badge" class="count-badge mono">0 posts</span>
+                  </div>
+                  <p class="panel-sub">Select any row to inspect its impression growth curve across snapshots</p>
+                </div>
+              </div>
+
+              <div class="posts-filter-bar">
+                <div class="posts-filter-left">
+                  <input
+                    type="search"
+                    id="post-search"
+                    class="telemetry-input posts-search-input"
+                    placeholder="Search post copy..."
+                    aria-label="Search posts"
+                  />
+                  <div class="segmented-group ptype-group" role="group" aria-label="Post Type Filter">
+                    <button type="button" class="seg-btn active" data-ptype="all">All</button>
+                    <button type="button" class="seg-btn" data-ptype="original">Original</button>
+                    <button type="button" class="seg-btn" data-ptype="thread">Thread</button>
+                    <button type="button" class="seg-btn" data-ptype="reply">Reply</button>
+                    <button type="button" class="seg-btn" data-ptype="media">Media</button>
+                    <button type="button" class="seg-btn" data-ptype="text-only">Text-Only</button>
+                  </div>
+                </div>
+                <div class="posts-filter-right">
+                  <select id="sort-by" class="telemetry-select" aria-label="Sort posts by">
+                    <option value="views">Sort: Views</option>
+                    <option value="velocity_24h">Sort: Velocity (+Δ/24h)</option>
+                    <option value="engagement_rate">Sort: ER%</option>
+                    <option value="bookmarks">Sort: Bookmarks</option>
+                    <option value="replies">Sort: Replies</option>
+                    <option value="high_signal_score">Sort: High-Signal</option>
+                    <option value="published_at">Sort: Published Date</option>
+                  </select>
+                  <button id="btn-sort-dir" type="button" class="btn-ghost mono" title="Toggle sort direction">DESC</button>
+                </div>
+              </div>
+
+              <div class="table-scroll">
+                <table class="posts-table">
+                  <thead>
+                    <tr>
+                      <th>Post</th>
+                      <th>Published (UTC)</th>
+                      <th class="num">Views</th>
+                      <th class="num">+Δ / 24h</th>
+                      <th class="num">ER%</th>
+                      <th class="num">High-Signal</th>
+                      <th class="num">Likes</th>
+                      <th class="num">Replies</th>
+                      <th class="num">Bookmarks</th>
+                    </tr>
+                  </thead>
+                  <tbody id="posts-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
     </div>
-
-    <!-- Live Sync Progress Bar -->
-    <div id="sync-progress-strip" class="sync-progress-strip hidden" aria-live="polite">
-      <div class="sync-progress-track">
-        <div id="sync-progress-fill" class="sync-progress-fill" style="width: 0%"></div>
-      </div>
-      <span id="sync-progress-text" class="sync-progress-text">Preparing sync...</span>
-    </div>
-  </header>
-
-  <main class="dashboard-main">
-    <!-- Toast Banner -->
-    <div id="toast-banner" class="toast-banner hidden" role="status" aria-live="polite"></div>
-
-    <!-- Tracked Handles Quick-Switch & Remove Chips -->
-    <div id="handle-chips-bar" class="handle-chips-bar hidden" aria-label="Tracked handles"></div>
-
-    <!-- Empty State -->
-    <section id="empty-state" class="panel-card empty-state hidden">
-      <div class="empty-state-content">
-        <h2>Track your first X handle</h2>
-        <p>Enter any X handle (or paste a post URL) to start tracking profile snapshots and impressions locally, or import an official X Analytics CSV / JSON export.</p>
-        <form id="empty-add-form" class="empty-add-form">
-          <label for="empty-handle-input" class="sr-only">X Handle</label>
-          <input id="empty-handle-input" type="text" class="telemetry-input" placeholder="Enter @handle (e.g. @itsprakhar_)" required />
-          <button type="submit" class="btn-primary">Track Handle</button>
-          <button id="btn-empty-import" type="button" class="btn-ghost">Import CSV / JSON</button>
-        </form>
-      </div>
-    </section>
-
-    <div id="dashboard-content">
-      <!-- Profile Identity Strip -->
-      <section class="panel-card profile-strip" aria-label="Account Overview">
-        <div class="profile-left">
-          <img id="profile-avatar" class="profile-avatar" src="" alt="" />
-          <div class="profile-meta">
-            <div class="profile-name-row">
-              <h2 id="profile-display-name" class="profile-display-name">—</h2>
-              <span id="profile-handle" class="profile-handle-mono">@—</span>
-              <span id="mode-badge" class="mode-pill">Cohort · Post-Publish Window</span>
-            </div>
-            <p id="profile-bio" class="profile-bio"></p>
-          </div>
-        </div>
-        <div class="profile-right">
-          <div class="mini-stat">
-            <span class="mini-label">Window Span</span>
-            <span id="meta-window-range" class="mini-val mono">—</span>
-          </div>
-          <div class="mini-stat">
-            <span class="mini-label">Cohort vs Velocity</span>
-            <span id="meta-cohort-vs-vel" class="mini-val mono">—</span>
-          </div>
-          <div class="mini-stat">
-            <span class="mini-label">Last Synced</span>
-            <span id="meta-last-synced" class="mini-val mono">—</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- KPI Summary Cards -->
-      <section class="kpi-grid" aria-label="Key Performance Indicators">
-        <article class="panel-card kpi-card">
-          <div class="kpi-header">
-            <span class="kpi-title" id="kpi-imp-title">Total Impressions</span>
-            <span id="kpi-imp-delta" class="delta-badge neutral">0.0%</span>
-          </div>
-          <div id="kpi-imp-value" class="kpi-value mono">0</div>
-          <div id="kpi-imp-sub" class="kpi-sub">Cohort vs Velocity</div>
-        </article>
-
-        <article class="panel-card kpi-card">
-          <div class="kpi-header">
-            <span class="kpi-title">Followers &amp; Velocity</span>
-            <span id="kpi-fol-delta" class="delta-badge neutral">+0</span>
-          </div>
-          <div id="kpi-fol-value" class="kpi-value mono">0</div>
-          <div id="kpi-fol-sub" class="kpi-sub">0.0 / day net growth</div>
-        </article>
-
-        <article class="panel-card kpi-card">
-          <div class="kpi-header">
-            <span class="kpi-title">Engagement Rate</span>
-            <span id="kpi-er-delta" class="delta-badge neutral">0.00 pts</span>
-          </div>
-          <div id="kpi-er-value" class="kpi-value mono">0.00%</div>
-          <div id="kpi-er-sub" class="kpi-sub">0 total engagements</div>
-        </article>
-
-        <article class="panel-card kpi-card kpi-accent-amber">
-          <div class="kpi-header">
-            <span class="kpi-title">Bookmarks &amp; High-Signal</span>
-            <span id="kpi-bm-delta" class="delta-badge neutral">0.0%</span>
-          </div>
-          <div id="kpi-bm-value" class="kpi-value mono">0</div>
-          <div id="kpi-bm-sub" class="kpi-sub">High-Signal: 0.0 / 1K views</div>
-        </article>
-
-        <article class="panel-card kpi-card">
-          <div class="kpi-header">
-            <span class="kpi-title">Bookmark / Like &amp; Virality</span>
-            <span id="kpi-vir-badge" class="delta-badge neutral">0.00%</span>
-          </div>
-          <div id="kpi-bl-value" class="kpi-value mono">0.0%</div>
-          <div id="kpi-bl-sub" class="kpi-sub">Virality (reposts / views)</div>
-        </article>
-
-        <article class="panel-card kpi-card">
-          <div class="kpi-header">
-            <span class="kpi-title">Posts &amp; Peak Window</span>
-            <span id="kpi-posts-delta" class="delta-badge neutral">0.0%</span>
-          </div>
-          <div id="kpi-posts-value" class="kpi-value mono">0</div>
-          <div id="kpi-posts-sub" class="kpi-sub">Best slot: —</div>
-        </article>
-      </section>
-
-      <!-- Charts Row 1: Impressions & Engagement Over Time + Follower Growth -->
-      <section class="charts-row-2-1">
-        <article class="panel-card chart-panel">
-          <div class="panel-header">
-            <div>
-              <h3 class="panel-title">Impressions &amp; Engagement Over Time</h3>
-              <p class="panel-sub">Views volume paired with total active engagements</p>
-            </div>
-            <div class="segmented-group" role="group" aria-label="Chart Aggregation Granularity">
-              <button type="button" class="seg-btn active" data-gran="daily">Daily</button>
-              <button type="button" class="seg-btn" data-gran="weekly">Weekly</button>
-              <button type="button" class="seg-btn" data-gran="monthly">Monthly</button>
-            </div>
-          </div>
-          <div class="chart-box-lg">
-            <canvas id="chart-over-time"></canvas>
-          </div>
-        </article>
-
-        <article class="panel-card chart-panel">
-          <div class="panel-header">
-            <div>
-              <h3 class="panel-title">Follower Growth Curve</h3>
-              <p class="panel-sub">Recorded audience trajectory &amp; daily net gains</p>
-            </div>
-          </div>
-          <div class="chart-box-lg">
-            <canvas id="chart-followers"></canvas>
-          </div>
-        </article>
-      </section>
-
-      <!-- Charts Row 2: Posting Cadence vs Impressions + Engagement & Media Breakdown -->
-      <section class="charts-row-1-1">
-        <article class="panel-card chart-panel">
-          <div class="panel-header">
-            <div>
-              <h3 class="panel-title">Posting Cadence vs. Impressions</h3>
-              <p class="panel-sub">Dual-axis comparison of post frequency and reach</p>
-            </div>
-          </div>
-          <div class="chart-box-md">
-            <canvas id="chart-cadence"></canvas>
-          </div>
-        </article>
-
-        <article class="panel-card chart-panel">
-          <div class="panel-header">
-            <div>
-              <h3 class="panel-title">Engagement &amp; Media Breakdown</h3>
-              <p class="panel-sub">Interaction mix and Media vs. Text-only performance</p>
-            </div>
-          </div>
-          <div class="breakdown-split">
-            <div class="chart-box-sm">
-              <canvas id="chart-engagement-breakdown"></canvas>
-            </div>
-            <div id="media-breakdown-list" class="media-breakdown-list"></div>
-          </div>
-        </article>
-      </section>
-
-      <!-- Charts Row 3: Best Time to Post Heatmap -->
-      <section class="panel-card chart-panel">
-        <div class="panel-header">
-          <div>
-            <h3 class="panel-title">Best Time to Post Heatmap</h3>
-            <p class="panel-sub">Average impressions per post by Day of Week &times; Hour of Day (UTC)</p>
-          </div>
-          <div class="heatmap-legend-cluster">
-            <span id="heatmap-best-badge" class="peak-slot-badge">Peak: —</span>
-            <div class="heatmap-scale" aria-hidden="true">
-              <span>Low</span>
-              <span class="scale-swatch s0"></span>
-              <span class="scale-swatch s1"></span>
-              <span class="scale-swatch s2"></span>
-              <span class="scale-swatch s3"></span>
-              <span class="scale-swatch s4"></span>
-              <span>High</span>
-            </div>
-          </div>
-        </div>
-        <div id="heatmap-container" class="heatmap-container"></div>
-      </section>
-
-      <!-- Searchable, Sortable Posts Table -->
-      <section class="panel-card posts-section">
-        <div class="posts-toolbar">
-          <div>
-            <h3 class="panel-title">Tracked Posts Explorer</h3>
-            <p class="panel-sub">Click any row to inspect its impression growth curve across snapshots</p>
-          </div>
-          <div class="posts-filters">
-            <input type="search" id="post-search" class="telemetry-input" placeholder="Search post copy..." aria-label="Search posts" />
-            <div class="segmented-group" role="group" aria-label="Post Type Filter">
-              <button type="button" class="seg-btn active" data-ptype="all">All</button>
-              <button type="button" class="seg-btn" data-ptype="original">Original</button>
-              <button type="button" class="seg-btn" data-ptype="thread">Thread</button>
-              <button type="button" class="seg-btn" data-ptype="reply">Reply</button>
-              <button type="button" class="seg-btn" data-ptype="media">Media</button>
-              <button type="button" class="seg-btn" data-ptype="text-only">Text-Only</button>
-            </div>
-            <select id="sort-by" class="telemetry-select" aria-label="Sort posts by">
-              <option value="views">Sort: Views</option>
-              <option value="velocity_24h">Sort: Velocity (+Δ/24h)</option>
-              <option value="engagement_rate">Sort: ER%</option>
-              <option value="bookmarks">Sort: Bookmarks</option>
-              <option value="replies">Sort: Replies</option>
-              <option value="high_signal_score">Sort: High-Signal</option>
-              <option value="published_at">Sort: Published Date</option>
-            </select>
-            <button id="btn-sort-dir" type="button" class="btn-ghost mono" title="Toggle sort direction">DESC</button>
-          </div>
-        </div>
-
-        <div class="table-scroll">
-          <table class="posts-table">
-            <thead>
-              <tr>
-                <th>Post</th>
-                <th>Published (UTC)</th>
-                <th class="num">Views</th>
-                <th class="num">+Δ / 24h</th>
-                <th class="num">ER%</th>
-                <th class="num">High-Signal</th>
-                <th class="num">Likes</th>
-                <th class="num">Replies</th>
-                <th class="num">Bookmarks</th>
-              </tr>
-            </thead>
-            <tbody id="posts-table-body"></tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-  </main>
+  </div>
 
   <!-- Post Detail Slide-Over Drawer -->
   <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
@@ -394,6 +523,6 @@
     </div>
   </aside>
 
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

@@ -1,8 +1,18 @@
 (() => {
   "use strict";
 
+  const VIEW_LABELS = {
+    all: "Dashboard",
+    overview: "Overview & KPIs",
+    analytics: "Charts & Timing",
+    posts: "Posts Explorer",
+  };
+
+  const DEFAULT_HEATMAP_READOUT = "Hover a cell to inspect slot";
+
   const state = {
     handle: "",
+    view: "all",
     timeframe: "30d",
     mode: "cohort",
     granularity: "daily",
@@ -36,6 +46,7 @@
 
   function showToast(message, isError = false) {
     const banner = $("toast-banner");
+    if (!banner) return;
     banner.textContent = message;
     banner.classList.remove("hidden", "error");
     if (isError) banner.classList.add("error");
@@ -46,6 +57,7 @@
   }
 
   function applyDeltaBadge(el, value, suffix = "%", invertZeroNeutral = true) {
+    if (!el) return;
     const num = Number(value || 0);
     el.classList.remove("pos", "neg", "neutral");
     const sign = num > 0 ? "+" : "";
@@ -70,6 +82,111 @@
     return typeof window.Chart === "function";
   }
 
+  function getChartTheme() {
+    return {
+      grid: {
+        color: "rgba(148, 163, 184, 0.08)",
+        drawTicks: false,
+      },
+      borderHidden: { display: false },
+      tick: {
+        color: "#94A3B8",
+        padding: 8,
+        font: { family: "'JetBrains Mono', monospace", size: 11 },
+      },
+      compactTick: {
+        color: "#94A3B8",
+        padding: 6,
+        font: { family: "'JetBrains Mono', monospace", size: 10 },
+      },
+      legend: {
+        labels: {
+          color: "#CBD5E1",
+          boxWidth: 10,
+          boxHeight: 10,
+          usePointStyle: true,
+          pointStyle: "circle",
+          padding: 16,
+          font: { family: "'Plus Jakarta Sans', sans-serif", size: 12, weight: "500" },
+        },
+      },
+      tooltip: {
+        backgroundColor: "#0F172A",
+        titleColor: "#F8FAFC",
+        bodyColor: "#CBD5E1",
+        borderColor: "rgba(148, 163, 184, 0.2)",
+        borderWidth: 1,
+        padding: 10,
+        cornerRadius: 8,
+        boxPadding: 5,
+        usePointStyle: true,
+        titleFont: { family: "'Plus Jakarta Sans', sans-serif", size: 12, weight: "600" },
+        bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+      },
+    };
+  }
+
+  function setMobileSidebarOpen(isOpen) {
+    const sidebar = $("sidebar");
+    const backdrop = $("sidebar-backdrop");
+    const menuBtn = $("btn-mobile-menu");
+    if (sidebar) sidebar.classList.toggle("open", isOpen);
+    if (backdrop) backdrop.classList.toggle("hidden", !isOpen);
+    if (menuBtn) menuBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
+  function closeMobileSidebar() {
+    setMobileSidebarOpen(false);
+  }
+
+  function toggleMobileSidebar() {
+    const sidebar = $("sidebar");
+    if (!sidebar) return;
+    setMobileSidebarOpen(!sidebar.classList.contains("open"));
+  }
+
+  function applyView(viewName) {
+    const validViews = ["all", "overview", "analytics", "posts"];
+    const nextView = validViews.includes(viewName) ? viewName : "all";
+    state.view = nextView;
+
+    document.querySelectorAll("[data-view]").forEach((btn) => {
+      const isActive = btn.dataset.view === nextView;
+      btn.classList.toggle("active", isActive);
+      if (isActive) {
+        btn.setAttribute("aria-current", "page");
+      } else {
+        btn.removeAttribute("aria-current");
+      }
+    });
+
+    const sections = {
+      overview: $("section-overview"),
+      analytics: $("section-analytics"),
+      posts: $("section-posts"),
+    };
+
+    Object.entries(sections).forEach(([key, el]) => {
+      if (!el) return;
+      const visible = nextView === "all" || nextView === key;
+      el.classList.toggle("hidden", !visible);
+    });
+
+    const titleEl = $("active-view-title") || $("view-title") || $("topbar-view-title");
+    if (titleEl) {
+      const activeBtn = document.querySelector(`[data-view="${nextView}"]`);
+      titleEl.textContent = activeBtn?.dataset.viewLabel || VIEW_LABELS[nextView] || "Dashboard";
+    }
+
+    requestAnimationFrame(() => {
+      Object.values(state.charts).forEach((chart) => {
+        if (chart && typeof chart.resize === "function") {
+          chart.resize();
+        }
+      });
+    });
+  }
+
   async function apiJson(url, options = {}) {
     const res = await fetch(url, options);
     const contentType = (res.headers.get("content-type") || "").toLowerCase();
@@ -83,6 +200,7 @@
 
   function renderHandleChips(accounts) {
     const bar = $("handle-chips-bar");
+    if (!bar) return;
     bar.innerHTML = "";
     if (!accounts.length) {
       bar.classList.add("hidden");
@@ -91,18 +209,33 @@
     bar.classList.remove("hidden");
 
     for (const acc of accounts) {
+      const isActive = acc.handle === state.handle;
       const chip = document.createElement("div");
-      chip.className = `handle-chip ${acc.handle === state.handle ? "active" : ""}`;
+      chip.className = `handle-chip${isActive ? " active" : ""}`;
 
       const selectBtn = document.createElement("button");
       selectBtn.type = "button";
-      selectBtn.className = "chip-select-btn";
-      selectBtn.textContent = `@${acc.handle}`;
+      selectBtn.className = `chip-select-btn${isActive ? " active" : ""}`;
       selectBtn.title = `Switch to @${acc.handle}`;
+      if (isActive) {
+        selectBtn.setAttribute("aria-current", "true");
+      }
+
+      const handleSpan = document.createElement("span");
+      handleSpan.className = "chip-handle";
+      handleSpan.textContent = `@${acc.handle}`;
+
+      const metaSpan = document.createElement("span");
+      metaSpan.className = "chip-meta mono";
+      metaSpan.textContent = fmtCompact(acc.followers_count);
+
+      selectBtn.append(handleSpan, metaSpan);
       selectBtn.addEventListener("click", async () => {
+        closeMobileSidebar();
         if (state.handle === acc.handle) return;
         state.handle = acc.handle;
-        $("handle-select").value = acc.handle;
+        const selectEl = $("handle-select");
+        if (selectEl) selectEl.value = acc.handle;
         renderHandleChips(accounts);
         await refreshDashboard();
       });
@@ -113,7 +246,10 @@
       removeBtn.textContent = "×";
       removeBtn.title = `Remove @${acc.handle}`;
       removeBtn.setAttribute("aria-label", `Remove @${acc.handle}`);
-      removeBtn.addEventListener("click", () => removeHandle(acc.handle));
+      removeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        removeHandle(acc.handle);
+      });
 
       chip.append(selectBtn, removeBtn);
       bar.appendChild(chip);
@@ -124,27 +260,32 @@
     const data = await apiJson("/api/accounts");
     const accounts = data.accounts || [];
     const select = $("handle-select");
-    const switchGroup = select.closest(".handle-switch-group");
-    select.innerHTML = "";
+    const switchGroup = select ? select.closest(".handle-switch-group") : null;
+    if (select) select.innerHTML = "";
+
+    const emptyState = $("empty-state");
+    const dashboardContent = $("dashboard-content");
 
     if (!accounts.length) {
       state.handle = "";
       if (switchGroup) switchGroup.classList.add("hidden");
       renderHandleChips([]);
-      $("empty-state").classList.remove("hidden");
-      $("dashboard-content").classList.add("hidden");
+      if (emptyState) emptyState.classList.remove("hidden");
+      if (dashboardContent) dashboardContent.classList.add("hidden");
       return false;
     }
 
     if (switchGroup) switchGroup.classList.remove("hidden");
-    $("empty-state").classList.add("hidden");
-    $("dashboard-content").classList.remove("hidden");
+    if (emptyState) emptyState.classList.add("hidden");
+    if (dashboardContent) dashboardContent.classList.remove("hidden");
 
-    for (const acc of accounts) {
-      const opt = document.createElement("option");
-      opt.value = acc.handle;
-      opt.textContent = `@${acc.handle} (${fmtCompact(acc.followers_count)})`;
-      select.appendChild(opt);
+    if (select) {
+      for (const acc of accounts) {
+        const opt = document.createElement("option");
+        opt.value = acc.handle;
+        opt.textContent = `@${acc.handle} (${fmtCompact(acc.followers_count)})`;
+        select.appendChild(opt);
+      }
     }
 
     const exists = (h) => accounts.some((a) => a.handle === h);
@@ -153,8 +294,9 @@
     } else if (!state.handle || !exists(state.handle)) {
       state.handle = accounts[0].handle;
     }
-    select.value = state.handle;
+    if (select) select.value = state.handle;
     renderHandleChips(accounts);
+    applyView(state.view);
     return true;
   }
 
@@ -163,8 +305,8 @@
     while (Date.now() - start < 180000) {
       await new Promise((r) => setTimeout(r, 450));
       const status = await apiJson("/api/sync/status");
-      fill.style.width = `${status.progress_pct || 25}%`;
-      text.textContent = status.message || `Syncing @${fallbackHandle}...`;
+      if (fill) fill.style.width = `${status.progress_pct || 25}%`;
+      if (text) text.textContent = status.message || `Syncing @${fallbackHandle}...`;
       if (!status.is_running) {
         return status;
       }
@@ -181,9 +323,9 @@
     const addBtn = $("btn-add-handle");
 
     if (addBtn) addBtn.disabled = true;
-    strip.classList.remove("hidden");
-    fill.style.width = "15%";
-    text.textContent = `Adding & syncing ${val}...`;
+    if (strip) strip.classList.remove("hidden");
+    if (fill) fill.style.width = "15%";
+    if (text) text.textContent = `Adding & syncing ${val}...`;
 
     try {
       const res = await apiJson("/api/accounts", {
@@ -193,11 +335,12 @@
       });
       const createdHandle = res.account?.handle;
       if (inputEl) inputEl.value = "";
+      closeMobileSidebar();
       await loadAccounts(createdHandle);
       await refreshDashboard();
 
       const finalStatus = await pollSyncUntilDone(fill, text, createdHandle);
-      fill.style.width = "100%";
+      if (fill) fill.style.width = "100%";
       const lastRes = finalStatus.last_result || {};
       const syncedPosts = lastRes.posts_synced || 0;
       const src = lastRes.source_used || "none";
@@ -212,7 +355,7 @@
       showToast(`Could not add handle: ${err.message}`, true);
     } finally {
       if (addBtn) addBtn.disabled = false;
-      setTimeout(() => strip.classList.add("hidden"), 1200);
+      if (strip) setTimeout(() => strip.classList.add("hidden"), 1200);
     }
   }
 
@@ -257,9 +400,9 @@
     renderProfile(data);
     renderKpis(data);
     renderCharts(data);
-    renderHeatmap(data.charts.heatmap);
-    renderMediaBreakdown(data.charts.media_breakdown);
-    renderPostsTable(data.posts);
+    renderHeatmap(data.charts?.heatmap);
+    renderMediaBreakdown(data.charts?.media_breakdown || []);
+    renderPostsTable(data.posts || []);
   }
 
   function renderProfile(data) {
@@ -267,27 +410,43 @@
     const win = data.window || {};
     const kpis = data.kpis || {};
     const avatar = $("profile-avatar");
-    if (acc.avatar_url) {
-      avatar.src = acc.avatar_url;
-      avatar.alt = `${acc.display_name || acc.handle} avatar`;
-    } else {
-      avatar.removeAttribute("src");
-      avatar.alt = "";
+    if (avatar) {
+      if (acc.avatar_url) {
+        avatar.src = acc.avatar_url;
+        avatar.alt = `${acc.display_name || acc.handle} avatar`;
+      } else {
+        avatar.removeAttribute("src");
+        avatar.alt = "";
+      }
     }
-    $("profile-display-name").textContent = acc.display_name || `@${acc.handle}`;
-    $("profile-handle").textContent = `@${acc.handle}`;
-    $("profile-bio").textContent = acc.bio || "Tracked local handle";
-    $("mode-badge").textContent =
-      win.mode === "velocity"
-        ? "Velocity · Snapshot Growth Window"
-        : "Cohort · Post-Publish Window";
+    if ($("profile-display-name")) {
+      $("profile-display-name").textContent = acc.display_name || `@${acc.handle}`;
+    }
+    if ($("profile-handle")) {
+      $("profile-handle").textContent = `@${acc.handle}`;
+    }
+    if ($("profile-bio")) {
+      $("profile-bio").textContent = acc.bio || "Tracked local handle";
+    }
+    if ($("mode-badge")) {
+      $("mode-badge").textContent =
+        win.mode === "velocity"
+          ? "Velocity · Snapshot Growth Window"
+          : "Cohort · Post-Publish Window";
+    }
 
     const sDate = (win.start_date || "").slice(0, 10);
     const eDate = (win.end_date || "").slice(0, 10);
-    $("meta-window-range").textContent = `${sDate} → ${eDate} (${win.days || 0}d)`;
-    $("meta-cohort-vs-vel").textContent =
-      `Cohort ${fmtCompact(kpis.cohort_impressions)} / Vel ${fmtCompact(kpis.velocity_impressions)}`;
-    $("meta-last-synced").textContent = (acc.last_synced_at || "Never").replace("T", " ").replace("Z", " UTC");
+    if ($("meta-window-range")) {
+      $("meta-window-range").textContent = `${sDate} → ${eDate} (${win.days || 0}d)`;
+    }
+    if ($("meta-cohort-vs-vel")) {
+      $("meta-cohort-vs-vel").textContent =
+        `Cohort ${fmtCompact(kpis.cohort_impressions)} / Vel ${fmtCompact(kpis.velocity_impressions)}`;
+    }
+    if ($("meta-last-synced")) {
+      $("meta-last-synced").textContent = (acc.last_synced_at || "Never").replace("T", " ").replace("Z", " UTC");
+    }
   }
 
   function renderKpis(data) {
@@ -295,227 +454,302 @@
     const win = data.window || {};
     const heatmap = data.charts?.heatmap || {};
 
-    $("kpi-imp-title").textContent =
-      win.mode === "velocity" ? "New Impressions (Velocity)" : "Total Impressions (Cohort)";
-    $("kpi-imp-value").textContent = fmtCompact(k.impressions);
+    if ($("kpi-imp-title")) {
+      $("kpi-imp-title").textContent =
+        win.mode === "velocity" ? "New Impressions (Velocity)" : "Total Impressions (Cohort)";
+    }
+    if ($("kpi-imp-value")) $("kpi-imp-value").textContent = fmtCompact(k.impressions);
     applyDeltaBadge($("kpi-imp-delta"), k.impressions_pct_change, "%");
-    $("kpi-imp-sub").textContent =
-      win.mode === "velocity"
-        ? `Cohort published in window: ${fmtCompact(k.cohort_impressions)}`
-        : `Snapshot velocity gained: ${fmtCompact(k.velocity_impressions)}`;
+    if ($("kpi-imp-sub")) {
+      $("kpi-imp-sub").textContent =
+        win.mode === "velocity"
+          ? `Cohort published in window: ${fmtCompact(k.cohort_impressions)}`
+          : `Snapshot velocity gained: ${fmtCompact(k.velocity_impressions)}`;
+    }
 
-    $("kpi-fol-value").textContent = fmtCompact(k.followers);
+    if ($("kpi-fol-value")) $("kpi-fol-value").textContent = fmtCompact(k.followers);
     const fDeltaEl = $("kpi-fol-delta");
-    fDeltaEl.classList.remove("pos", "neg", "neutral");
-    const gained = Number(k.followers_gained || 0);
-    fDeltaEl.textContent = `${gained >= 0 ? "+" : ""}${fmtInt(gained)}`;
-    fDeltaEl.classList.add(gained > 0 ? "pos" : gained < 0 ? "neg" : "neutral");
-    $("kpi-fol-sub").textContent = `${Number(k.follower_daily_velocity || 0).toFixed(1)} / day net velocity`;
+    if (fDeltaEl) {
+      fDeltaEl.classList.remove("pos", "neg", "neutral");
+      const gained = Number(k.followers_gained || 0);
+      fDeltaEl.textContent = `${gained >= 0 ? "+" : ""}${fmtInt(gained)}`;
+      fDeltaEl.classList.add(gained > 0 ? "pos" : gained < 0 ? "neg" : "neutral");
+    }
+    if ($("kpi-fol-sub")) {
+      $("kpi-fol-sub").textContent = `${Number(k.follower_daily_velocity || 0).toFixed(1)} / day net velocity`;
+    }
 
-    $("kpi-er-value").textContent = `${Number(k.engagement_rate || 0).toFixed(2)}%`;
+    if ($("kpi-er-value")) $("kpi-er-value").textContent = `${Number(k.engagement_rate || 0).toFixed(2)}%`;
     applyDeltaBadge($("kpi-er-delta"), k.engagement_rate_delta, " pts");
-    $("kpi-er-sub").textContent = `${fmtInt(k.total_engagements)} total engagements`;
+    if ($("kpi-er-sub")) $("kpi-er-sub").textContent = `${fmtInt(k.total_engagements)} total engagements`;
 
-    $("kpi-bm-value").textContent = fmtCompact(k.bookmarks);
+    if ($("kpi-bm-value")) $("kpi-bm-value").textContent = fmtCompact(k.bookmarks);
     applyDeltaBadge($("kpi-bm-delta"), k.bookmarks_pct_change, "%");
-    $("kpi-bm-sub").textContent = `High-Signal: ${Number(k.high_signal_score || 0).toFixed(1)} / 1K views`;
+    if ($("kpi-bm-sub")) {
+      $("kpi-bm-sub").textContent = `High-Signal: ${Number(k.high_signal_score || 0).toFixed(1)} / 1K views`;
+    }
 
-    $("kpi-bl-value").textContent = `${Number(k.bookmark_to_like_ratio || 0).toFixed(1)}%`;
+    if ($("kpi-bl-value")) $("kpi-bl-value").textContent = `${Number(k.bookmark_to_like_ratio || 0).toFixed(1)}%`;
     const virBadge = $("kpi-vir-badge");
-    virBadge.className = "delta-badge neutral";
-    virBadge.textContent = `Virality ${Number(k.virality_ratio || 0).toFixed(2)}%`;
-    $("kpi-bl-sub").textContent = `Bookmark-to-like (${fmtInt(k.likes)} likes · ${fmtInt(k.reposts)} reposts)`;
+    if (virBadge) {
+      virBadge.className = "delta-badge neutral";
+      virBadge.textContent = `Virality ${Number(k.virality_ratio || 0).toFixed(2)}%`;
+    }
+    if ($("kpi-bl-sub")) {
+      $("kpi-bl-sub").textContent = `Bookmark-to-like (${fmtInt(k.likes)} likes · ${fmtInt(k.reposts)} reposts)`;
+    }
 
-    $("kpi-posts-value").textContent = fmtInt(k.total_posts);
+    if ($("kpi-posts-value")) $("kpi-posts-value").textContent = fmtInt(k.total_posts);
     applyDeltaBadge($("kpi-posts-delta"), k.total_posts_pct_change, "%");
-    $("kpi-posts-sub").textContent = `Peak slot: ${heatmap.best_day || "—"} ${heatmap.best_hour_label || ""}`;
+    if ($("kpi-posts-sub")) {
+      $("kpi-posts-sub").textContent = `Peak slot: ${heatmap.best_day || "—"} ${heatmap.best_hour_label || ""}`;
+    }
   }
 
   function renderCharts(data) {
     if (!hasChartJs()) return;
     const charts = data.charts || {};
-    const commonGrid = { color: "rgba(36, 48, 68, 0.55)" };
-    const commonTick = { color: "#94A3B8", font: { family: "JetBrains Mono", size: 11 } };
+    const theme = getChartTheme();
 
     // 1. Impressions & Engagement Over Time
     destroyChart("overTime");
-    const overTime = charts.over_time || [];
-    state.charts.overTime = new Chart($("chart-over-time"), {
-      type: "bar",
-      data: {
-        labels: overTime.map((d) => d.label),
-        datasets: [
-          {
-            type: "line",
-            label: "Impressions",
-            data: overTime.map((d) => d.impressions),
-            borderColor: "#38BDF8",
-            backgroundColor: "rgba(56, 189, 248, 0.16)",
-            fill: true,
-            tension: 0.32,
-            borderWidth: 2,
-            pointRadius: overTime.length > 45 ? 0 : 2.5,
-            yAxisID: "y",
-          },
-          {
-            type: "bar",
-            label: "Engagements",
-            data: overTime.map((d) => d.engagements),
-            backgroundColor: "rgba(245, 158, 11, 0.72)",
-            borderRadius: 4,
-            yAxisID: "y1",
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: { labels: { color: "#E2E8F0", boxWidth: 12 } },
+    const overTimeCtx = $("chart-over-time");
+    if (overTimeCtx) {
+      const overTime = charts.over_time || [];
+      state.charts.overTime = new Chart(overTimeCtx, {
+        type: "bar",
+        data: {
+          labels: overTime.map((d) => d.label),
+          datasets: [
+            {
+              type: "line",
+              label: "Impressions",
+              data: overTime.map((d) => d.impressions),
+              borderColor: "#38BDF8",
+              backgroundColor: "rgba(56, 189, 248, 0.14)",
+              fill: true,
+              tension: 0.34,
+              borderWidth: 2,
+              pointRadius: overTime.length > 45 ? 0 : 2.5,
+              pointHoverRadius: 5,
+              pointHoverBorderWidth: 2,
+              pointBackgroundColor: "#38BDF8",
+              yAxisID: "y",
+            },
+            {
+              type: "bar",
+              label: "Engagements",
+              data: overTime.map((d) => d.engagements),
+              backgroundColor: "rgba(245, 158, 11, 0.72)",
+              hoverBackgroundColor: "rgba(245, 158, 11, 0.92)",
+              borderRadius: 5,
+              maxBarThickness: 28,
+              yAxisID: "y1",
+            },
+          ],
         },
-        scales: {
-          x: { grid: { display: false }, ticks: { ...commonTick, maxTicksLimit: 12 } },
-          y: {
-            position: "left",
-            grid: commonGrid,
-            ticks: { ...commonTick, callback: (v) => fmtCompact(v) },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { top: 4, right: 4, bottom: 0, left: 0 } },
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: theme.legend,
+            tooltip: theme.tooltip,
           },
-          y1: {
-            position: "right",
-            grid: { display: false },
-            ticks: { ...commonTick, callback: (v) => fmtCompact(v) },
+          scales: {
+            x: {
+              border: theme.borderHidden,
+              grid: { display: false },
+              ticks: { ...theme.tick, maxTicksLimit: 12 },
+            },
+            y: {
+              position: "left",
+              border: theme.borderHidden,
+              grid: theme.grid,
+              ticks: { ...theme.tick, callback: (v) => fmtCompact(v) },
+            },
+            y1: {
+              position: "right",
+              border: theme.borderHidden,
+              grid: { display: false },
+              ticks: { ...theme.tick, callback: (v) => fmtCompact(v) },
+            },
           },
         },
-      },
-    });
+      });
+    }
 
     // 2. Follower Growth Curve
     destroyChart("followers");
-    const fSeries = charts.follower_growth || [];
-    state.charts.followers = new Chart($("chart-followers"), {
-      type: "line",
-      data: {
-        labels: fSeries.map((d) => d.date.slice(5)),
-        datasets: [
-          {
-            label: "Followers",
-            data: fSeries.map((d) => d.followers_count),
-            borderColor: "#10B981",
-            backgroundColor: "rgba(16, 185, 129, 0.14)",
-            fill: true,
-            tension: 0.28,
-            borderWidth: 2,
-            pointRadius: fSeries.length > 40 ? 0 : 2,
+    const followersCtx = $("chart-followers");
+    if (followersCtx) {
+      const fSeries = charts.follower_growth || [];
+      state.charts.followers = new Chart(followersCtx, {
+        type: "line",
+        data: {
+          labels: fSeries.map((d) => (d.date || "").slice(5)),
+          datasets: [
+            {
+              label: "Followers",
+              data: fSeries.map((d) => d.followers_count),
+              borderColor: "#10B981",
+              backgroundColor: "rgba(16, 185, 129, 0.14)",
+              fill: true,
+              tension: 0.3,
+              borderWidth: 2,
+              pointRadius: fSeries.length > 40 ? 0 : 2.5,
+              pointHoverRadius: 5,
+              pointHoverBorderWidth: 2,
+              pointBackgroundColor: "#10B981",
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { top: 8, right: 4, bottom: 0, left: 0 } },
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: theme.tooltip,
           },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, ticks: { ...commonTick, maxTicksLimit: 8 } },
-          y: {
-            grid: commonGrid,
-            ticks: { ...commonTick, callback: (v) => fmtCompact(v) },
+          scales: {
+            x: {
+              border: theme.borderHidden,
+              grid: { display: false },
+              ticks: { ...theme.tick, maxTicksLimit: 8 },
+            },
+            y: {
+              border: theme.borderHidden,
+              grid: theme.grid,
+              ticks: { ...theme.tick, callback: (v) => fmtCompact(v) },
+            },
           },
         },
-      },
-    });
+      });
+    }
 
     // 3. Posting Cadence vs Impressions
     destroyChart("cadence");
-    const cadence = charts.cadence_vs_impressions || [];
-    state.charts.cadence = new Chart($("chart-cadence"), {
-      type: "bar",
-      data: {
-        labels: cadence.map((d) => d.label),
-        datasets: [
-          {
-            type: "bar",
-            label: "Posts Published",
-            data: cadence.map((d) => d.posts_count),
-            backgroundColor: "rgba(56, 189, 248, 0.35)",
-            borderColor: "#38BDF8",
-            borderWidth: 1,
-            borderRadius: 4,
-            yAxisID: "y",
+    const cadenceCtx = $("chart-cadence");
+    if (cadenceCtx) {
+      const cadence = charts.cadence_vs_impressions || [];
+      state.charts.cadence = new Chart(cadenceCtx, {
+        type: "bar",
+        data: {
+          labels: cadence.map((d) => d.label),
+          datasets: [
+            {
+              type: "bar",
+              label: "Posts Published",
+              data: cadence.map((d) => d.posts_count),
+              backgroundColor: "rgba(56, 189, 248, 0.32)",
+              hoverBackgroundColor: "rgba(56, 189, 248, 0.55)",
+              borderColor: "#38BDF8",
+              borderWidth: 1,
+              borderRadius: 5,
+              maxBarThickness: 28,
+              yAxisID: "y",
+            },
+            {
+              type: "line",
+              label: "Impressions",
+              data: cadence.map((d) => d.impressions),
+              borderColor: "#F59E0B",
+              tension: 0.32,
+              borderWidth: 2,
+              pointRadius: cadence.length > 45 ? 0 : 2.5,
+              pointHoverRadius: 5,
+              pointHoverBorderWidth: 2,
+              pointBackgroundColor: "#F59E0B",
+              yAxisID: "y1",
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { top: 4, right: 4, bottom: 0, left: 0 } },
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: theme.legend,
+            tooltip: theme.tooltip,
           },
-          {
-            type: "line",
-            label: "Impressions",
-            data: cadence.map((d) => d.impressions),
-            borderColor: "#F59E0B",
-            tension: 0.3,
-            borderWidth: 2,
-            pointRadius: cadence.length > 45 ? 0 : 2.5,
-            yAxisID: "y1",
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: { legend: { labels: { color: "#E2E8F0", boxWidth: 12 } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { ...commonTick, maxTicksLimit: 10 } },
-          y: {
-            position: "left",
-            beginAtZero: true,
-            grid: commonGrid,
-            ticks: { ...commonTick, stepSize: 1 },
-          },
-          y1: {
-            position: "right",
-            beginAtZero: true,
-            grid: { display: false },
-            ticks: { ...commonTick, callback: (v) => fmtCompact(v) },
+          scales: {
+            x: {
+              border: theme.borderHidden,
+              grid: { display: false },
+              ticks: { ...theme.tick, maxTicksLimit: 10 },
+            },
+            y: {
+              position: "left",
+              beginAtZero: true,
+              border: theme.borderHidden,
+              grid: theme.grid,
+              ticks: { ...theme.tick, stepSize: 1 },
+            },
+            y1: {
+              position: "right",
+              beginAtZero: true,
+              border: theme.borderHidden,
+              grid: { display: false },
+              ticks: { ...theme.tick, callback: (v) => fmtCompact(v) },
+            },
           },
         },
-      },
-    });
+      });
+    }
 
     // 4. Engagement Breakdown
     destroyChart("engagement");
-    const totals = charts.engagement_breakdown?.totals || {};
-    state.charts.engagement = new Chart($("chart-engagement-breakdown"), {
-      type: "doughnut",
-      data: {
-        labels: ["Likes", "Bookmarks", "Reposts", "Replies", "Quotes"],
-        datasets: [
-          {
-            data: [
-              totals.likes || 0,
-              totals.bookmarks || 0,
-              totals.reposts || 0,
-              totals.replies || 0,
-              totals.quotes || 0,
-            ],
-            backgroundColor: ["#38BDF8", "#F59E0B", "#10B981", "#A78BFA", "#FB7185"],
-            borderColor: "#111827",
-            borderWidth: 2,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: "62%",
-        plugins: {
-          legend: {
-            position: "bottom",
-            labels: { color: "#CBD5E1", boxWidth: 10, font: { size: 11 } },
+    const engagementCtx = $("chart-engagement-breakdown");
+    if (engagementCtx) {
+      const totals = charts.engagement_breakdown?.totals || {};
+      state.charts.engagement = new Chart(engagementCtx, {
+        type: "doughnut",
+        data: {
+          labels: ["Likes", "Bookmarks", "Reposts", "Replies", "Quotes"],
+          datasets: [
+            {
+              data: [
+                totals.likes || 0,
+                totals.bookmarks || 0,
+                totals.reposts || 0,
+                totals.replies || 0,
+                totals.quotes || 0,
+              ],
+              backgroundColor: ["#38BDF8", "#F59E0B", "#10B981", "#A78BFA", "#FB7185"],
+              borderColor: "#101622",
+              borderWidth: 2,
+              hoverOffset: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: "66%",
+          layout: { padding: { top: 4, bottom: 4 } },
+          plugins: {
+            legend: {
+              position: "bottom",
+              labels: {
+                ...theme.legend.labels,
+                padding: 14,
+                font: { family: "'Plus Jakarta Sans', sans-serif", size: 11, weight: "500" },
+              },
+            },
+            tooltip: theme.tooltip,
           },
         },
-      },
-    });
+      });
+    }
   }
 
   function renderMediaBreakdown(items) {
     const container = $("media-breakdown-list");
+    if (!container) return;
     container.innerHTML = "";
     const maxAvg = Math.max(1, ...items.map((i) => Number(i.avg_views || 0)));
 
@@ -559,11 +793,21 @@
 
   function renderHeatmap(heatmap) {
     const container = $("heatmap-container");
+    if (!container) return;
     container.innerHTML = "";
+
+    const readoutEl = $("heatmap-hover-readout");
+    if (readoutEl) {
+      readoutEl.textContent = DEFAULT_HEATMAP_READOUT;
+    }
+
     if (!heatmap || !heatmap.matrix) return;
 
-    $("heatmap-best-badge").textContent =
-      `Peak: ${heatmap.best_day} ${heatmap.best_hour_label} (${fmtCompact(heatmap.best_slot_avg_views)} avg)`;
+    const bestBadge = $("heatmap-best-badge");
+    if (bestBadge) {
+      bestBadge.textContent =
+        `Peak: ${heatmap.best_day} ${heatmap.best_hour_label} (${fmtCompact(heatmap.best_slot_avg_views)} avg)`;
+    }
 
     const table = document.createElement("table");
     table.className = "heatmap-table";
@@ -593,8 +837,26 @@
       for (const cell of rowCells) {
         const td = document.createElement("td");
         td.className = "heatmap-cell";
+        td.tabIndex = 0;
         td.style.backgroundColor = heatColor(cell.avg_views, maxAvg);
-        td.title = `${cell.day} ${cell.hour_label} UTC — ${cell.post_count} post(s), avg ${fmtInt(Math.round(cell.avg_views))} views`;
+        const readoutText = `${cell.day} ${cell.hour_label} UTC · ${cell.post_count} post(s) · ${fmtInt(Math.round(cell.avg_views))} avg views`;
+        td.title = readoutText;
+        td.setAttribute("aria-label", readoutText);
+
+        const showReadout = () => {
+          const el = $("heatmap-hover-readout");
+          if (el) el.textContent = readoutText;
+        };
+        const clearReadout = () => {
+          const el = $("heatmap-hover-readout");
+          if (el) el.textContent = DEFAULT_HEATMAP_READOUT;
+        };
+
+        td.addEventListener("mouseenter", showReadout);
+        td.addEventListener("focus", showReadout);
+        td.addEventListener("mouseleave", clearReadout);
+        td.addEventListener("blur", clearReadout);
+
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -605,9 +867,15 @@
 
   function renderPostsTable(posts) {
     const tbody = $("posts-table-body");
+    const list = Array.isArray(posts) ? posts : [];
+    const countBadge = $("posts-count-badge");
+    if (countBadge) {
+      countBadge.textContent = `${list.length} post${list.length === 1 ? "" : "s"}`;
+    }
+    if (!tbody) return;
     tbody.innerHTML = "";
 
-    if (!posts || !posts.length) {
+    if (!list.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = 9;
@@ -620,7 +888,7 @@
       return;
     }
 
-    for (const p of posts) {
+    for (const p of list) {
       const tr = document.createElement("tr");
       tr.className = "clickable-row";
       tr.tabIndex = 0;
@@ -696,62 +964,83 @@
 
   async function openPostDrawer(postId) {
     const detail = await apiJson(`/api/posts/${encodeURIComponent(postId)}`);
-    $("drawer-meta").textContent =
-      `@${detail.handle} · ${(detail.published_at || "").replace("T", " ").replace("Z", " UTC")}`;
-    $("drawer-x-link").href = detail.permalink || `https://x.com/${detail.handle}/status/${detail.post_id}`;
-    $("drawer-text").textContent = detail.text || "";
-
-    const badges = $("drawer-badges");
-    badges.innerHTML = "";
-    const mediaTag = document.createElement("span");
-    mediaTag.className = `type-badge ${detail.media_type !== "none" ? "media" : ""}`;
-    mediaTag.textContent = detail.media_type === "none" ? "TEXT-ONLY" : String(detail.media_type).toUpperCase();
-    badges.appendChild(mediaTag);
-    if (detail.is_thread) {
-      const tb = document.createElement("span");
-      tb.className = "type-badge thread";
-      tb.textContent = "THREAD";
-      badges.appendChild(tb);
+    if ($("drawer-meta")) {
+      $("drawer-meta").textContent =
+        `@${detail.handle} · ${(detail.published_at || "").replace("T", " ").replace("Z", " UTC")}`;
+    }
+    if ($("drawer-x-link")) {
+      $("drawer-x-link").href = detail.permalink || `https://x.com/${detail.handle}/status/${detail.post_id}`;
+    }
+    if ($("drawer-text")) {
+      $("drawer-text").textContent = detail.text || "";
     }
 
-    $("dk-views").textContent = fmtInt(detail.views);
-    $("dk-vel").textContent = `+${fmtInt(detail.velocity_24h || 0)}`;
-    $("dk-er").textContent = `${Number(detail.engagement_rate || 0).toFixed(2)}%`;
-    $("dk-hs").textContent = Number(detail.high_signal_score || 0).toFixed(1);
-    $("dk-likes").textContent = fmtInt(detail.likes);
-    $("dk-bm").textContent = fmtInt(detail.bookmarks);
+    const badges = $("drawer-badges");
+    if (badges) {
+      badges.innerHTML = "";
+      const mediaTag = document.createElement("span");
+      mediaTag.className = `type-badge ${detail.media_type !== "none" ? "media" : ""}`;
+      mediaTag.textContent = detail.media_type === "none" ? "TEXT-ONLY" : String(detail.media_type).toUpperCase();
+      badges.appendChild(mediaTag);
+      if (detail.is_thread) {
+        const tb = document.createElement("span");
+        tb.className = "type-badge thread";
+        tb.textContent = "THREAD";
+        badges.appendChild(tb);
+      }
+    }
+
+    if ($("dk-views")) $("dk-views").textContent = fmtInt(detail.views);
+    if ($("dk-vel")) $("dk-vel").textContent = `+${fmtInt(detail.velocity_24h || 0)}`;
+    if ($("dk-er")) $("dk-er").textContent = `${Number(detail.engagement_rate || 0).toFixed(2)}%`;
+    if ($("dk-hs")) $("dk-hs").textContent = Number(detail.high_signal_score || 0).toFixed(1);
+    if ($("dk-likes")) $("dk-likes").textContent = fmtInt(detail.likes);
+    if ($("dk-bm")) $("dk-bm").textContent = fmtInt(detail.bookmarks);
 
     const snaps = detail.snapshots || [];
-    if (hasChartJs()) {
+    const snapCtx = $("chart-post-snapshots");
+    if (hasChartJs() && snapCtx) {
+      const theme = getChartTheme();
       destroyChart("postSnapshots");
-      state.charts.postSnapshots = new Chart($("chart-post-snapshots"), {
+      state.charts.postSnapshots = new Chart(snapCtx, {
         type: "line",
         data: {
-          labels: snaps.map((s) => s.captured_at.slice(5, 16).replace("T", " ")),
+          labels: snaps.map((s) => (s.captured_at || "").slice(5, 16).replace("T", " ")),
           datasets: [
             {
               label: "Cumulative Views",
               data: snaps.map((s) => s.views),
               borderColor: "#38BDF8",
-              backgroundColor: "rgba(56, 189, 248, 0.16)",
+              backgroundColor: "rgba(56, 189, 248, 0.14)",
               fill: true,
-              tension: 0.28,
+              tension: 0.3,
               borderWidth: 2,
+              pointRadius: snaps.length > 30 ? 0 : 3,
+              pointHoverRadius: 5,
+              pointHoverBorderWidth: 2,
+              pointBackgroundColor: "#38BDF8",
             },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          layout: { padding: { top: 6, right: 4, bottom: 0, left: 0 } },
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: theme.tooltip,
+          },
           scales: {
             x: {
+              border: theme.borderHidden,
               grid: { display: false },
-              ticks: { color: "#94A3B8", font: { family: "JetBrains Mono", size: 10 }, maxTicksLimit: 6 },
+              ticks: { ...theme.compactTick, maxTicksLimit: 6 },
             },
             y: {
-              grid: { color: "rgba(36, 48, 68, 0.55)" },
-              ticks: { color: "#94A3B8", font: { family: "JetBrains Mono", size: 10 }, callback: (v) => fmtCompact(v) },
+              border: theme.borderHidden,
+              grid: theme.grid,
+              ticks: { ...theme.compactTick, callback: (v) => fmtCompact(v) },
             },
           },
         },
@@ -759,34 +1048,36 @@
     }
 
     const tbody = $("drawer-snapshots-body");
-    tbody.innerHTML = "";
-    for (const s of [...snaps].reverse()) {
-      const tr = document.createElement("tr");
-      const cells = [
-        (s.captured_at || "").replace("T", " ").replace("Z", ""),
-        fmtInt(s.views),
-        `+${fmtInt(s.views_delta)}`,
-        fmtInt(s.likes),
-        fmtInt(s.replies),
-        fmtInt(s.reposts),
-        fmtInt(s.bookmarks),
-      ];
-      cells.forEach((txt, idx) => {
-        const td = document.createElement("td");
-        td.className = idx > 0 ? "num" : "mono";
-        td.textContent = txt;
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
+    if (tbody) {
+      tbody.innerHTML = "";
+      for (const s of [...snaps].reverse()) {
+        const tr = document.createElement("tr");
+        const cells = [
+          (s.captured_at || "").replace("T", " ").replace("Z", ""),
+          fmtInt(s.views),
+          `+${fmtInt(s.views_delta)}`,
+          fmtInt(s.likes),
+          fmtInt(s.replies),
+          fmtInt(s.reposts),
+          fmtInt(s.bookmarks),
+        ];
+        cells.forEach((txt, idx) => {
+          const td = document.createElement("td");
+          td.className = idx > 0 ? "num" : "mono";
+          td.textContent = txt;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
     }
 
-    $("drawer-backdrop").classList.remove("hidden");
-    $("post-drawer").classList.remove("hidden");
+    if ($("drawer-backdrop")) $("drawer-backdrop").classList.remove("hidden");
+    if ($("post-drawer")) $("post-drawer").classList.remove("hidden");
   }
 
   function closePostDrawer() {
-    $("drawer-backdrop").classList.add("hidden");
-    $("post-drawer").classList.add("hidden");
+    if ($("drawer-backdrop")) $("drawer-backdrop").classList.add("hidden");
+    if ($("post-drawer")) $("post-drawer").classList.add("hidden");
   }
 
   async function triggerSyncNow() {
@@ -795,14 +1086,15 @@
     const strip = $("sync-progress-strip");
     const fill = $("sync-progress-fill");
     const text = $("sync-progress-text");
-    const dot = btn.querySelector(".sync-dot");
+    const dot = btn ? btn.querySelector(".sync-dot") : null;
+    const label = $("sync-btn-label");
 
-    btn.disabled = true;
-    dot.classList.add("pulsing");
-    $("sync-btn-label").textContent = "Syncing...";
-    strip.classList.remove("hidden");
-    fill.style.width = "15%";
-    text.textContent = `Fetching @${state.handle} via FxTwitter v2...`;
+    if (btn) btn.disabled = true;
+    if (dot) dot.classList.add("pulsing");
+    if (label) label.textContent = "Syncing...";
+    if (strip) strip.classList.remove("hidden");
+    if (fill) fill.style.width = "15%";
+    if (text) text.textContent = `Fetching @${state.handle} via FxTwitter v2...`;
 
     try {
       await apiJson("/api/sync", {
@@ -811,7 +1103,7 @@
         body: JSON.stringify({ handle: state.handle, background: true }),
       });
       const finalStatus = await pollSyncUntilDone(fill, text, state.handle);
-      fill.style.width = "100%";
+      if (fill) fill.style.width = "100%";
       const res = Array.isArray(finalStatus.last_result)
         ? finalStatus.last_result[0] || {}
         : finalStatus.last_result || {};
@@ -830,10 +1122,10 @@
     } catch (err) {
       showToast(`Sync failed: ${err.message}`, true);
     } finally {
-      btn.disabled = false;
-      dot.classList.remove("pulsing");
-      $("sync-btn-label").textContent = "Sync Now";
-      setTimeout(() => strip.classList.add("hidden"), 1500);
+      if (btn) btn.disabled = false;
+      if (dot) dot.classList.remove("pulsing");
+      if (label) label.textContent = "Sync Now";
+      if (strip) setTimeout(() => strip.classList.add("hidden"), 1500);
     }
   }
 
@@ -851,6 +1143,7 @@
       showToast(
         `Imported ${res.posts_imported} post(s) and ${res.snapshots_created} snapshot(s) into @${res.handle}.`
       );
+      closeMobileSidebar();
       await loadAccounts(res.handle);
       await refreshDashboard();
     } catch (err) {
@@ -859,29 +1152,60 @@
   }
 
   function wireEvents() {
-    $("handle-select").addEventListener("change", async (e) => {
-      state.handle = e.target.value;
-      await loadAccounts(state.handle);
-      await refreshDashboard();
+    // View navigation tabs
+    document.querySelectorAll("[data-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        applyView(btn.dataset.view);
+        closeMobileSidebar();
+      });
     });
 
-    $("inline-add-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = $("inline-handle-input");
-      await addHandle(input.value, input);
-    });
+    // Mobile sidebar drawer
+    const mobileMenuBtn = $("btn-mobile-menu");
+    if (mobileMenuBtn) {
+      mobileMenuBtn.addEventListener("click", toggleMobileSidebar);
+    }
+    const sidebarBackdrop = $("sidebar-backdrop");
+    if (sidebarBackdrop) {
+      sidebarBackdrop.addEventListener("click", closeMobileSidebar);
+    }
 
-    $("empty-add-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = $("empty-handle-input");
-      await addHandle(input.value, input);
-    });
+    const handleSelect = $("handle-select");
+    if (handleSelect) {
+      handleSelect.addEventListener("change", async (e) => {
+        state.handle = e.target.value;
+        closeMobileSidebar();
+        await loadAccounts(state.handle);
+        await refreshDashboard();
+      });
+    }
 
-    $("btn-remove-handle").addEventListener("click", async () => {
-      if (state.handle) {
-        await removeHandle(state.handle);
-      }
-    });
+    const inlineAddForm = $("inline-add-form");
+    if (inlineAddForm) {
+      inlineAddForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const input = $("inline-handle-input");
+        if (input) await addHandle(input.value, input);
+      });
+    }
+
+    const emptyAddForm = $("empty-add-form");
+    if (emptyAddForm) {
+      emptyAddForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const input = $("empty-handle-input");
+        if (input) await addHandle(input.value, input);
+      });
+    }
+
+    const removeHandleBtn = $("btn-remove-handle");
+    if (removeHandleBtn) {
+      removeHandleBtn.addEventListener("click", async () => {
+        if (state.handle) {
+          await removeHandle(state.handle);
+        }
+      });
+    }
 
     document.querySelectorAll("[data-mode]").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -899,29 +1223,36 @@
         state.timeframe = btn.dataset.tf;
         const customBar = $("custom-date-bar");
         if (state.timeframe === "custom") {
-          customBar.classList.remove("hidden");
-          if (!$("custom-start").value || !$("custom-end").value) {
-            const end = new Date();
-            const start = new Date(end.getTime() - 14 * 86400 * 1000);
-            $("custom-start").value = start.toISOString().slice(0, 10);
-            $("custom-end").value = end.toISOString().slice(0, 10);
+          if (customBar) customBar.classList.remove("hidden");
+          const startEl = $("custom-start");
+          const endEl = $("custom-end");
+          if (startEl && endEl) {
+            if (!startEl.value || !endEl.value) {
+              const end = new Date();
+              const start = new Date(end.getTime() - 14 * 86400 * 1000);
+              startEl.value = start.toISOString().slice(0, 10);
+              endEl.value = end.toISOString().slice(0, 10);
+            }
+            state.startDate = startEl.value;
+            state.endDate = endEl.value;
           }
-          state.startDate = $("custom-start").value;
-          state.endDate = $("custom-end").value;
-        } else {
+        } else if (customBar) {
           customBar.classList.add("hidden");
         }
         await refreshDashboard();
       });
     });
 
-    $("btn-apply-custom").addEventListener("click", async () => {
-      state.startDate = $("custom-start").value;
-      state.endDate = $("custom-end").value;
-      if (state.startDate && state.endDate) {
-        await refreshDashboard();
-      }
-    });
+    const applyCustomBtn = $("btn-apply-custom");
+    if (applyCustomBtn) {
+      applyCustomBtn.addEventListener("click", async () => {
+        state.startDate = $("custom-start")?.value || "";
+        state.endDate = $("custom-end")?.value || "";
+        if (state.startDate && state.endDate) {
+          await refreshDashboard();
+        }
+      });
+    }
 
     document.querySelectorAll("[data-gran]").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -942,54 +1273,89 @@
     });
 
     let searchTimer = null;
-    $("post-search").addEventListener("input", (e) => {
-      state.search = e.target.value;
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(refreshDashboard, 180);
-    });
+    const postSearch = $("post-search");
+    if (postSearch) {
+      postSearch.addEventListener("input", (e) => {
+        state.search = e.target.value;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(refreshDashboard, 180);
+      });
+    }
 
-    $("sort-by").addEventListener("change", async (e) => {
-      state.sortBy = e.target.value;
-      await refreshDashboard();
-    });
+    const sortBy = $("sort-by");
+    if (sortBy) {
+      sortBy.addEventListener("change", async (e) => {
+        state.sortBy = e.target.value;
+        await refreshDashboard();
+      });
+    }
 
-    $("btn-sort-dir").addEventListener("click", async () => {
-      state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
-      $("btn-sort-dir").textContent = state.sortDir.toUpperCase();
-      await refreshDashboard();
-    });
+    const sortDirBtn = $("btn-sort-dir");
+    if (sortDirBtn) {
+      sortDirBtn.addEventListener("click", async () => {
+        state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
+        sortDirBtn.textContent = state.sortDir.toUpperCase();
+        await refreshDashboard();
+      });
+    }
 
-    $("btn-sync-now").addEventListener("click", triggerSyncNow);
+    const syncBtn = $("btn-sync-now");
+    if (syncBtn) {
+      syncBtn.addEventListener("click", triggerSyncNow);
+    }
 
-    $("btn-import").addEventListener("click", () => $("import-file-input").click());
-    $("btn-empty-import").addEventListener("click", () => $("import-file-input").click());
-    $("import-file-input").addEventListener("change", async (e) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      await handleFileImport(file);
-    });
+    const importFileInput = $("import-file-input");
+    const importBtn = $("btn-import");
+    if (importBtn && importFileInput) {
+      importBtn.addEventListener("click", () => importFileInput.click());
+    }
+    const emptyImportBtn = $("btn-empty-import");
+    if (emptyImportBtn && importFileInput) {
+      emptyImportBtn.addEventListener("click", () => importFileInput.click());
+    }
+    if (importFileInput) {
+      importFileInput.addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        await handleFileImport(file);
+      });
+    }
 
-    $("btn-export-csv").addEventListener("click", () => {
-      if (!state.handle) return;
-      window.location.href = `/api/export?handle=${encodeURIComponent(state.handle)}&format=csv`;
-    });
+    const exportCsvBtn = $("btn-export-csv");
+    if (exportCsvBtn) {
+      exportCsvBtn.addEventListener("click", () => {
+        if (!state.handle) return;
+        window.location.href = `/api/export?handle=${encodeURIComponent(state.handle)}&format=csv`;
+      });
+    }
 
-    $("btn-export-json").addEventListener("click", () => {
-      if (!state.handle) return;
-      window.location.href = `/api/export?handle=${encodeURIComponent(state.handle)}&format=json`;
-    });
+    const exportJsonBtn = $("btn-export-json");
+    if (exportJsonBtn) {
+      exportJsonBtn.addEventListener("click", () => {
+        if (!state.handle) return;
+        window.location.href = `/api/export?handle=${encodeURIComponent(state.handle)}&format=json`;
+      });
+    }
 
-    $("btn-close-drawer").addEventListener("click", closePostDrawer);
-    $("drawer-backdrop").addEventListener("click", closePostDrawer);
+    const closeDrawerBtn = $("btn-close-drawer");
+    if (closeDrawerBtn) {
+      closeDrawerBtn.addEventListener("click", closePostDrawer);
+    }
+    const drawerBackdrop = $("drawer-backdrop");
+    if (drawerBackdrop) {
+      drawerBackdrop.addEventListener("click", closePostDrawer);
+    }
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         closePostDrawer();
+        closeMobileSidebar();
       }
     });
   }
 
   async function init() {
     wireEvents();
+    applyView(state.view);
     try {
       const hasAccounts = await loadAccounts();
       if (hasAccounts) {
