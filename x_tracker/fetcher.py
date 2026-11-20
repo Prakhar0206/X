@@ -7,6 +7,7 @@ import io
 import json
 import random
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 from typing import Any, Callable
@@ -25,13 +26,21 @@ from x_tracker.models import (
 )
 
 USER_AGENTS: tuple[str, ...] = (
+    "curl/8.7.1",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "XAnalyticsTracker/1.0 (+https://github.com/local-first/x-analytics-tracker)",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "XAnalyticsTracker/1.0 (+https://github.com/local-first/x-analytics-tracker)",
 )
+
+
+def _first_non_none(mapping: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        val = mapping.get(key)
+        if val is not None:
+            return val
+    return None
 
 DEFAULT_NITTER_INSTANCES: tuple[str, ...] = (
     "https://nitter.net",
@@ -117,6 +126,7 @@ class MultiSourceFetcher:
         self.transport = transport
         self.sleep_fn = sleep_fn
         self._ua_index = 0
+        self._thread_local = threading.local()
 
     def _next_user_agent(self) -> str:
         ua = USER_AGENTS[self._ua_index % len(USER_AGENTS)]
@@ -128,10 +138,12 @@ class MultiSourceFetcher:
         url: str,
         headers: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
+        retry_on_404: bool = False,
     ) -> httpx.Response:
         """Perform an HTTP GET with User-Agent rotation, exponential backoff, and jitter."""
         last_exc: Exception | None = None
         last_response: httpx.Response | None = None
+        shared_client: httpx.Client | None = getattr(self._thread_local, "client", None)
 
         for attempt in range(self.max_retries):
             req_headers = {
@@ -142,15 +154,23 @@ class MultiSourceFetcher:
                 req_headers.update(headers)
 
             try:
-                with httpx.Client(
-                    timeout=self.timeout,
-                    transport=self.transport,
-                    follow_redirects=True,
-                ) as client:
-                    response = client.get(url, headers=req_headers, params=params)
+                if shared_client is not None:
+                    response = shared_client.get(url, headers=req_headers, params=params)
+                else:
+                    with httpx.Client(
+                        timeout=self.timeout,
+                        transport=self.transport,
+                        follow_redirects=True,
+                    ) as client:
+                        response = client.get(url, headers=req_headers, params=params)
                 last_response = response
 
-                if response.status_code == 429 or 500 <= response.status_code < 600:
+                should_retry = (
+                    response.status_code == 429
+                    or 500 <= response.status_code < 600
+                    or (retry_on_404 and response.status_code == 404)
+                )
+                if should_retry:
                     if attempt < self.max_retries - 1:
                         delay = (self.base_backoff * (2 ** attempt)) + random.uniform(
                             0.01, max(0.02, self.base_backoff * 0.4)
@@ -189,13 +209,15 @@ class MultiSourceFetcher:
             "display_name": str(user.get("name") or norm),
             "avatar_url": str(user.get("avatar_url") or ""),
             "bio": str(user.get("description") or user.get("bio") or ""),
-            "followers_count": safe_int(user.get("followers", user.get("followers_count"))),
-            "following_count": safe_int(user.get("following", user.get("friends_count"))),
-            "total_posts": safe_int(user.get("tweets", user.get("statuses_count"))),
+            "followers_count": safe_int(_first_non_none(user, "followers", "followers_count")),
+            "following_count": safe_int(_first_non_none(user, "following", "friends_count")),
+            "total_posts": safe_int(_first_non_none(user, "tweets", "statuses", "statuses_count")),
             "created_at": normalize_utc_iso(user.get("joined") or user.get("created_at")),
         }
 
-    def parse_fxtwitter_tweet(self, data: Any, handle: str) -> dict[str, Any] | None:
+    def parse_fxtwitter_tweet(
+        self, data: Any, handle: str, own_only: bool = False
+    ) -> dict[str, Any] | None:
         """Extract normalized post metrics from an FxTwitter tweet payload without failing on partial fields."""
         if not isinstance(data, dict):
             return None
@@ -207,8 +229,16 @@ class MultiSourceFetcher:
         if not post_id:
             return None
 
+        norm_target = normalize_handle(handle)
         author = tweet.get("author") if isinstance(tweet.get("author"), dict) else {}
-        norm_handle = normalize_handle(str(author.get("screen_name") or handle))
+        author_screen = normalize_handle(str(author.get("screen_name") or ""))
+        norm_handle = author_screen or norm_target
+
+        if own_only:
+            if tweet.get("reposted_by"):
+                return None
+            if author_screen and norm_target and author_screen != norm_target:
+                return None
 
         raw_text_obj = tweet.get("raw_text") if isinstance(tweet.get("raw_text"), dict) else {}
         text = tweet.get("text")
@@ -216,18 +246,30 @@ class MultiSourceFetcher:
             text = raw_text_obj.get("text")
         text_str = str(text) if text is not None else ""
 
-        ts = tweet.get("created_timestamp")
-        if ts is None:
-            ts = tweet.get("created_at")
+        ts = _first_non_none(tweet, "created_timestamp", "created_at")
 
         media_type = _detect_media_type(tweet.get("media"), tweet.get("entities"))
         if tweet.get("poll") and media_type == "none":
             media_type = "poll"
 
         permalink = str(tweet.get("url") or "").strip() or f"https://x.com/{norm_handle}/status/{post_id}"
-        is_reply = bool(tweet.get("replying_to") or tweet.get("in_reply_to_status_id"))
-        is_repost = bool(tweet.get("retweeted_status") or text_str.startswith("RT @"))
-        is_thread = bool(tweet.get("is_thread") or "🧵" in text_str or re.search(r"\b1/\d+\b", text_str))
+
+        replying_to = tweet.get("replying_to")
+        replying_handle = ""
+        if isinstance(replying_to, dict):
+            replying_handle = normalize_handle(str(replying_to.get("screen_name") or ""))
+        elif isinstance(replying_to, str):
+            replying_handle = normalize_handle(replying_to)
+        in_reply_to_id = tweet.get("in_reply_to_status_id")
+        is_self_reply = bool(replying_handle and replying_handle == norm_handle)
+        is_reply = bool((replying_handle and not is_self_reply) or (in_reply_to_id and not is_self_reply))
+        is_repost = bool(tweet.get("retweeted_status") or tweet.get("reposted_by") or text_str.startswith("RT @"))
+        is_thread = bool(
+            tweet.get("is_thread")
+            or is_self_reply
+            or "🧵" in text_str
+            or re.search(r"\b1/\d+\b", text_str)
+        )
 
         return {
             "post_id": post_id,
@@ -239,12 +281,12 @@ class MultiSourceFetcher:
             "is_repost": is_repost,
             "is_thread": is_thread,
             "permalink": permalink,
-            "views": safe_int(tweet.get("views", tweet.get("view_count"))),
-            "likes": safe_int(tweet.get("likes", tweet.get("favorite_count"))),
-            "replies": safe_int(tweet.get("replies", tweet.get("reply_count"))),
-            "reposts": safe_int(tweet.get("retweets", tweet.get("reposts", tweet.get("retweet_count")))),
-            "bookmarks": safe_int(tweet.get("bookmarks", tweet.get("bookmark_count"))),
-            "quotes": safe_int(tweet.get("quotes", tweet.get("quote_count"))),
+            "views": safe_int(_first_non_none(tweet, "views", "view_count")),
+            "likes": safe_int(_first_non_none(tweet, "likes", "favorite_count")),
+            "replies": safe_int(_first_non_none(tweet, "replies", "reply_count")),
+            "reposts": safe_int(_first_non_none(tweet, "reposts", "retweets", "retweet_count")),
+            "bookmarks": safe_int(_first_non_none(tweet, "bookmarks", "bookmark_count")),
+            "quotes": safe_int(_first_non_none(tweet, "quotes", "quote_count")),
         }
 
     def parse_vxtwitter_tweet(self, data: Any, handle: str) -> dict[str, Any] | None:
@@ -518,11 +560,111 @@ class MultiSourceFetcher:
 
         return collected
 
+    def _fetch_fxtwitter_v2_timeline(
+        self,
+        handle: str,
+        max_pages: int = 20,
+        max_posts: int = 1000,
+        with_replies: bool = False,
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """Paginate FxTwitter API v2 (/2/profile/{handle}/statuses) filtering to own-authored posts."""
+        norm = normalize_handle(handle)
+        url = f"https://api.fxtwitter.com/2/profile/{norm}/statuses"
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        seen_ids: set[str] = set()
+        collected: list[dict[str, Any]] = []
+        extracted_profile: dict[str, Any] | None = None
+        label = "replies" if with_replies else "posts"
+
+        for page_num in range(1, max_pages + 1):
+            params: dict[str, Any] = {"count": 40}
+            if with_replies:
+                params["withReplies"] = "true"
+            if cursor:
+                params["cursor"] = cursor
+
+            data: dict[str, Any] | None = None
+            try:
+                resp = self.request_with_retry(url, params=params, retry_on_404=True)
+            except httpx.RequestError:
+                resp = None
+            if resp is not None and resp.status_code == 200:
+                try:
+                    parsed_json = resp.json()
+                except ValueError:
+                    parsed_json = None
+                if isinstance(parsed_json, dict) and parsed_json.get("results"):
+                    data = parsed_json
+
+            if not data:
+                break
+
+            results = data.get("results")
+            if not isinstance(results, list) or not results:
+                break
+
+            new_added = 0
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                post = self.parse_fxtwitter_tweet(item, norm, own_only=True)
+                if post is None:
+                    continue
+                if extracted_profile is None and isinstance(item.get("author"), dict):
+                    extracted_profile = self.parse_fxtwitter_profile(item["author"], norm)
+                pid = post["post_id"]
+                if pid not in seen_ids:
+                    seen_ids.add(pid)
+                    collected.append(post)
+                    new_added += 1
+                    if len(collected) >= max_posts:
+                        if progress_callback:
+                            progress_callback(page_num, f"Fetched {len(collected)} {label} via FxTwitter v2...")
+                        return extracted_profile, collected
+
+            if progress_callback:
+                progress_callback(page_num, f"Fetched {len(collected)} {label} (page {page_num})...")
+
+            cursor_obj = data.get("cursor")
+            next_cursor = (
+                str(cursor_obj.get("bottom") or "").strip()
+                if isinstance(cursor_obj, dict)
+                else ""
+            )
+            if (
+                not next_cursor
+                or next_cursor == cursor
+                or next_cursor in seen_cursors
+                or new_added == 0
+            ):
+                break
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+            if self.max_retries > 1:
+                self.sleep_fn(min(0.12, max(0.01, self.base_backoff * 0.25)))
+
+        return extracted_profile, collected
+
+    def parse_fxtwitter_rss(self, xml_text: str, handle: str) -> list[dict[str, Any]]:
+        """Parse FxTwitter's RSS XML feed (fxtwitter.com/{handle}/feed.xml) filtered to own posts."""
+        norm = normalize_handle(handle)
+        posts, _ = self.parse_nitter_rss_or_json(xml_text, norm)
+        own_posts = []
+        for post in posts:
+            permalink_handle = _extract_handle_from_url(post.get("permalink", ""))
+            if not permalink_handle or permalink_handle == norm:
+                own_posts.append(post)
+        return own_posts
+
     def sync_handle(
         self,
         handle: str,
-        max_pages: int = 5,
+        max_pages: int = 20,
         post_ids: list[str] | None = None,
+        include_replies: bool = True,
+        progress_callback: Callable[[int, str], None] | None = None,
     ) -> SyncResult:
         """Synchronize profile and post snapshots using multi-source fallback."""
         norm = normalize_handle(handle)
@@ -536,10 +678,52 @@ class MultiSourceFetcher:
         posts_by_id: dict[str, dict[str, Any]] = {}
         source_used = "none"
 
-        # 1. Primary: FxTwitter profile + paginated timeline
+        with httpx.Client(
+            timeout=self.timeout,
+            transport=self.transport,
+            follow_redirects=True,
+        ) as session_client:
+            self._thread_local.client = session_client
+            try:
+                return self._sync_handle_with_session(
+                    norm=norm,
+                    max_pages=max_pages,
+                    post_ids=post_ids,
+                    include_replies=include_replies,
+                    progress_callback=progress_callback,
+                    fallback_chain=fallback_chain,
+                    warnings=warnings,
+                    errors=errors,
+                    profile=profile,
+                    posts_by_id=posts_by_id,
+                    source_used=source_used,
+                )
+            finally:
+                self._thread_local.client = None
+
+    def _sync_handle_with_session(
+        self,
+        norm: str,
+        max_pages: int,
+        post_ids: list[str] | None,
+        include_replies: bool,
+        progress_callback: Callable[[int, str], None] | None,
+        fallback_chain: list[str],
+        warnings: list[str],
+        errors: list[str],
+        profile: dict[str, Any] | None,
+        posts_by_id: dict[str, dict[str, Any]],
+        source_used: str,
+    ) -> SyncResult:
+
+        # 1. Primary: FxTwitter profile + API v2 statuses pagination (posts + optional replies)
         fallback_chain.append("fxtwitter")
+        if progress_callback:
+            progress_callback(10, f"Fetching @{norm} profile & posts from FxTwitter v2...")
         try:
-            prof_resp = self.request_with_retry(f"https://api.fxtwitter.com/{norm}")
+            prof_resp = self.request_with_retry(
+                f"https://api.fxtwitter.com/{norm}", retry_on_404=True
+            )
             if prof_resp.status_code == 200:
                 profile = self.parse_fxtwitter_profile(prof_resp.json(), norm)
                 if profile:
@@ -550,13 +734,56 @@ class MultiSourceFetcher:
             warnings.append(f"FxTwitter profile error: {exc}")
 
         try:
-            fx_posts = self.fetch_timeline_paginated(norm, max_pages=max_pages)
-            for p in fx_posts:
+            def _on_v2_progress(page: int, msg: str) -> None:
+                if progress_callback:
+                    pct = min(75, 15 + page * 5)
+                    progress_callback(pct, msg)
+
+            v2_profile, v2_posts = self._fetch_fxtwitter_v2_timeline(
+                norm,
+                max_pages=max_pages,
+                with_replies=False,
+                progress_callback=_on_v2_progress,
+            )
+            if profile is None and v2_profile is not None:
+                profile = v2_profile
+            for p in v2_posts:
                 posts_by_id[p["post_id"]] = p
-            if fx_posts and source_used == "none":
-                source_used = "fxtwitter"
+
+            if include_replies:
+                rep_profile, rep_posts = self._fetch_fxtwitter_v2_timeline(
+                    norm,
+                    max_pages=max_pages,
+                    with_replies=True,
+                    progress_callback=_on_v2_progress,
+                )
+                if profile is None and rep_profile is not None:
+                    profile = rep_profile
+                for p in rep_posts:
+                    posts_by_id.setdefault(p["post_id"], p)
+
+            if posts_by_id:
+                source_used = "fxtwitter_v2"
+                if "fxtwitter_v2" not in fallback_chain:
+                    fallback_chain.append("fxtwitter_v2")
         except Exception as exc:
-            warnings.append(f"FxTwitter timeline error: {exc}")
+            warnings.append(f"FxTwitter v2 timeline error: {exc}")
+
+        # 1b. Secondary FxTwitter fallback: RSS feed.xml if v2 returned no posts
+        if not posts_by_id:
+            try:
+                rss_resp = self.request_with_retry(
+                    f"https://fxtwitter.com/{norm}/feed.xml",
+                    params={"count": 100},
+                )
+                if rss_resp.status_code == 200 and "<item>" in rss_resp.text:
+                    rss_posts = self.parse_fxtwitter_rss(rss_resp.text, norm)
+                    for p in rss_posts:
+                        posts_by_id.setdefault(p["post_id"], p)
+                    if rss_posts and source_used == "none":
+                        source_used = "fxtwitter_rss"
+            except Exception as exc:
+                warnings.append(f"FxTwitter RSS error: {exc}")
 
         # 2. Fallback: Twitter Syndication timeline
         if profile is None or not posts_by_id:
@@ -615,7 +842,10 @@ class MultiSourceFetcher:
             fetched_post: dict[str, Any] | None = None
 
             try:
-                fx_post_resp = self.request_with_retry(f"https://api.fxtwitter.com/{norm}/status/{pid}")
+                fx_post_resp = self.request_with_retry(
+                    f"https://api.fxtwitter.com/{norm}/status/{pid}",
+                    retry_on_404=True,
+                )
                 if fx_post_resp.status_code == 200:
                     fetched_post = self.parse_fxtwitter_tweet(fx_post_resp.json(), norm)
             except Exception as exc:
@@ -639,6 +869,8 @@ class MultiSourceFetcher:
             fallback_chain.append("vxtwitter")
 
         # 5. Persist to SQLite
+        if progress_callback:
+            progress_callback(88, f"Saving {len(posts_by_id)} post snapshots to SQLite...")
         synced_at = utc_now_iso()
         profile_updated = False
         if profile is not None:

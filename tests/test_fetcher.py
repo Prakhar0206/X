@@ -238,3 +238,159 @@ def test_import_official_csv_and_archive_json_and_roundtrip_export(tmp_path: Pat
     assert p3 is not None
     assert p3["media_type"] == "photo"
     assert p3["published_at"] == "2026-11-14T16:00:00Z"
+
+
+def test_fxtwitter_v2_statuses_pagination_replies_and_author_filtering(tmp_path: Path) -> None:
+    db = Database(tmp_path / "fxv2.db")
+    db.init_db()
+    page2_attempts = 0
+
+    author_self = {
+        "screen_name": "itsprakhar_",
+        "name": "Prakhar Aggarwal",
+        "followers": 31,
+        "following": 43,
+        "statuses": 540,
+        "avatar_url": "https://pbs.twimg.com/profile_images/example.jpg",
+        "joined": "Wed Mar 18 10:33:24 +0000 2026",
+    }
+    author_other = {
+        "screen_name": "mr_salio",
+        "name": "Mr Salio",
+        "followers": 12000,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal page2_attempts
+        url = str(request.url)
+        if url.endswith("/itsprakhar_") or "/itsprakhar_?" in url:
+            return httpx.Response(404, json={"code": 404, "message": "User not found"})
+
+        if "/2/profile/itsprakhar_/statuses" in url:
+            params = dict(request.url.params)
+            cursor = params.get("cursor")
+            with_replies = params.get("withReplies") == "true"
+
+            if with_replies:
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "results": [
+                            {
+                                "id": "1004",
+                                "text": "Parent tweet by another author",
+                                "author": author_other,
+                                "views": 90000,
+                                "likes": 1200,
+                                "reposts": 110,
+                                "replies": 40,
+                                "bookmarks": 300,
+                                "created_timestamp": 1795180000,
+                            },
+                            {
+                                "id": "1005",
+                                "text": "@mr_salio tiny school research team???",
+                                "author": author_self,
+                                "replying_to": "mr_salio",
+                                "views": 850,
+                                "likes": 19,
+                                "reposts": 2,
+                                "replies": 1,
+                                "bookmarks": 4,
+                                "created_timestamp": 1795181000,
+                            },
+                        ],
+                        "cursor": {"top": None, "bottom": None},
+                    },
+                )
+
+            if cursor is None:
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "results": [
+                            {
+                                "id": "1001",
+                                "text": "Gemini 4 breakdown thread",
+                                "author": author_self,
+                                "views": 12500,
+                                "likes": 310,
+                                "replies": 18,
+                                "reposts": 42,
+                                "bookmarks": 95,
+                                "quotes": 7,
+                                "media": {"photos": [{"type": "photo"}]},
+                                "created_timestamp": 1795186000,
+                            },
+                            {
+                                "id": "1002",
+                                "text": "Reposted viral tweet from someone else",
+                                "author": author_other,
+                                "reposted_by": {"screen_name": "itsprakhar_"},
+                                "views": 500000,
+                                "likes": 15000,
+                                "created_timestamp": 1795185000,
+                            },
+                        ],
+                        "cursor": {"top": "top_1", "bottom": "cur_page_2"},
+                    },
+                )
+
+            if cursor == "cur_page_2":
+                page2_attempts += 1
+                if page2_attempts == 1:
+                    return httpx.Response(404, json={"code": 404, "results": []})
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "results": [
+                            {
+                                "id": "1003",
+                                "text": "Self reply continuing thread",
+                                "author": author_self,
+                                "replying_to": "itsprakhar_",
+                                "views": 4200,
+                                "likes": 85,
+                                "replies": 4,
+                                "reposts": 11,
+                                "bookmarks": 22,
+                                "created_timestamp": 1795185500,
+                            }
+                        ],
+                        "cursor": {"top": "top_2", "bottom": None},
+                    },
+                )
+
+        return httpx.Response(404, json={"error": "not found"})
+
+    fetcher = MultiSourceFetcher(
+        db=db,
+        max_retries=3,
+        base_backoff=0.01,
+        transport=httpx.MockTransport(handler),
+        sleep_fn=lambda _: None,
+    )
+
+    result = fetcher.sync_handle("@itsprakhar_", max_pages=5)
+    assert result.success is True
+    assert result.source_used == "fxtwitter_v2"
+    assert result.posts_synced == 3
+    assert page2_attempts == 2
+
+    acc = db.get_account("itsprakhar_")
+    assert acc is not None
+    assert acc["followers_count"] == 31
+    assert acc["total_posts"] == 540
+
+    stored_ids = {p["post_id"] for p in db.get_posts("itsprakhar_")}
+    assert stored_ids == {"1001", "1003", "1005"}
+
+    p1 = db.get_post_detail("1001")
+    p3 = db.get_post_detail("1003")
+    p5 = db.get_post_detail("1005")
+    assert p1 is not None and p1["reposts"] == 42 and p1["media_type"] == "photo"
+    assert p3 is not None and p3["is_thread"] is True and p3["is_reply"] is False
+    assert p5 is not None and p5["is_reply"] is True

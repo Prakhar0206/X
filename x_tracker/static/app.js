@@ -158,27 +158,61 @@
     return true;
   }
 
+  async function pollSyncUntilDone(fill, text, fallbackHandle) {
+    const start = Date.now();
+    while (Date.now() - start < 180000) {
+      await new Promise((r) => setTimeout(r, 450));
+      const status = await apiJson("/api/sync/status");
+      fill.style.width = `${status.progress_pct || 25}%`;
+      text.textContent = status.message || `Syncing @${fallbackHandle}...`;
+      if (!status.is_running) {
+        return status;
+      }
+    }
+    throw new Error("Sync timed out after 3 minutes.");
+  }
+
   async function addHandle(rawInput, inputEl = null) {
     const val = (rawInput || "").trim();
     if (!val) return;
+    const strip = $("sync-progress-strip");
+    const fill = $("sync-progress-fill");
+    const text = $("sync-progress-text");
+    const addBtn = $("btn-add-handle");
+
+    if (addBtn) addBtn.disabled = true;
+    strip.classList.remove("hidden");
+    fill.style.width = "15%";
+    text.textContent = `Adding & syncing ${val}...`;
+
     try {
       const res = await apiJson("/api/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle: val, sync: true }),
+        body: JSON.stringify({ handle: val, sync: true, background: true }),
       });
       const createdHandle = res.account?.handle;
       if (inputEl) inputEl.value = "";
-      const syncedPosts = res.sync_result?.posts_synced || 0;
+      await loadAccounts(createdHandle);
+      await refreshDashboard();
+
+      const finalStatus = await pollSyncUntilDone(fill, text, createdHandle);
+      fill.style.width = "100%";
+      const lastRes = finalStatus.last_result || {};
+      const syncedPosts = lastRes.posts_synced || 0;
+      const src = lastRes.source_used || "none";
       showToast(
         syncedPosts > 0
-          ? `Added @${createdHandle} and synced ${syncedPosts} post(s).`
+          ? `Added @${createdHandle} and synced ${syncedPosts} post(s) via ${src}.`
           : `Added @${createdHandle} to tracked handles.`
       );
       await loadAccounts(createdHandle);
       await refreshDashboard();
     } catch (err) {
       showToast(`Could not add handle: ${err.message}`, true);
+    } finally {
+      if (addBtn) addBtn.disabled = false;
+      setTimeout(() => strip.classList.add("hidden"), 1200);
     }
   }
 
@@ -767,25 +801,20 @@
     dot.classList.add("pulsing");
     $("sync-btn-label").textContent = "Syncing...";
     strip.classList.remove("hidden");
-    fill.style.width = "25%";
-    text.textContent = `Fetching @${state.handle} via multi-source fallback...`;
-
-    const pollTimer = setInterval(async () => {
-      try {
-        const status = await apiJson("/api/sync/status");
-        fill.style.width = `${status.progress_pct || 45}%`;
-        text.textContent = status.message || "Syncing...";
-      } catch (_) {}
-    }, 350);
+    fill.style.width = "15%";
+    text.textContent = `Fetching @${state.handle} via FxTwitter v2...`;
 
     try {
-      const resp = await apiJson("/api/sync", {
+      await apiJson("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle: state.handle }),
+        body: JSON.stringify({ handle: state.handle, background: true }),
       });
+      const finalStatus = await pollSyncUntilDone(fill, text, state.handle);
       fill.style.width = "100%";
-      const res = resp.result || {};
+      const res = Array.isArray(finalStatus.last_result)
+        ? finalStatus.last_result[0] || {}
+        : finalStatus.last_result || {};
       if (res.success) {
         showToast(
           `Synced @${state.handle} via ${res.source_used}: ${res.posts_synced} post(s), ${res.snapshots_recorded} snapshot(s).`
@@ -801,7 +830,6 @@
     } catch (err) {
       showToast(`Sync failed: ${err.message}`, true);
     } finally {
-      clearInterval(pollTimer);
       btn.disabled = false;
       dot.classList.remove("pulsing");
       $("sync-btn-label").textContent = "Sync Now";

@@ -184,3 +184,21 @@ def test_delete_demo_data_and_add_handle_by_url(tmp_path: Path) -> None:
 
     remaining = [a["handle"] for a in client.get("/api/accounts").json()["accounts"]]
     assert remaining == ["itsprakhar_"]
+
+    # Background sync mode starts immediately and completes asynchronously
+    bg_resp = client.post("/api/sync", json={"handle": "itsprakhar_", "background": True})
+    assert bg_resp.status_code == 200
+    assert bg_resp.json()["started"] is True
+
+    import time
+
+    for _ in range(40):
+        st = client.get("/api/sync/status").json()
+        if not st["is_running"] and st["progress_pct"] == 100:
+            break
+        time.sleep(0.05)
+
+    final_st = client.get("/api/sync/status").json()
+    assert final_st["is_running"] is False
+    assert final_st["progress_pct"] == 100
+    assert final_st["last_result"]["profile_updated"] is True

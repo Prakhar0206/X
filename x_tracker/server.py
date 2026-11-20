@@ -45,12 +45,14 @@ def _parse_handle_input(raw_input: str) -> tuple[str, list[str] | None]:
 class AddAccountPayload(BaseModel):
     handle: str
     sync: bool = True
+    background: bool = False
 
 
 class SyncPayload(BaseModel):
     handle: str | None = None
-    max_pages: int = 5
+    max_pages: int = 20
     post_ids: list[str] | None = None
+    background: bool = False
 
 
 def create_app(
@@ -63,7 +65,11 @@ def create_app(
     db = Database(resolved_db)
     db.init_db()
 
-    fetcher = MultiSourceFetcher(db=db, transport=transport)
+    fetcher = MultiSourceFetcher(
+        db=db,
+        transport=transport,
+        sleep_fn=(lambda _: None) if transport is not None else __import__("time").sleep,
+    )
     analytics = AnalyticsEngine(db=db)
     active_scheduler = scheduler
 
@@ -76,6 +82,69 @@ def create_app(
         "last_synced_at": None,
         "last_result": None,
     }
+
+    def _run_sync_targets(
+        targets: list[str], max_pages: int, post_ids: list[str] | None
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        try:
+            total = len(targets)
+            for idx, handle in enumerate(targets):
+                with sync_lock:
+                    sync_state["current_handle"] = handle
+                    sync_state["progress_pct"] = max(12, int((idx / total) * 90) + 10)
+                    sync_state["message"] = f"Fetching @{handle} ({idx + 1}/{total})..."
+
+                def _on_sync_progress(pct: int, msg: str, base_idx: int = idx) -> None:
+                    with sync_lock:
+                        scaled = int((base_idx / total) * 90 + (pct / total) * 0.9)
+                        sync_state["progress_pct"] = max(10, min(95, scaled))
+                        sync_state["message"] = msg
+
+                res = fetcher.sync_handle(
+                    handle,
+                    max_pages=max_pages,
+                    post_ids=post_ids,
+                    progress_callback=_on_sync_progress,
+                )
+                results.append(res.model_dump())
+        finally:
+            with sync_lock:
+                sync_state["is_running"] = False
+                sync_state["progress_pct"] = 100
+                sync_state["current_handle"] = None
+                sync_state["last_synced_at"] = utc_now_iso()
+                sync_state["last_result"] = results[0] if len(results) == 1 else results
+                sync_state["message"] = (
+                    f"Synced {len(results)} handle(s) at {sync_state['last_synced_at']}"
+                )
+        return results
+
+    def _start_sync(
+        targets: list[str],
+        max_pages: int,
+        post_ids: list[str] | None,
+        background: bool,
+    ) -> tuple[bool, list[dict[str, Any]] | None]:
+        with sync_lock:
+            if background and sync_state["is_running"]:
+                return False, None
+            sync_state["is_running"] = True
+            sync_state["progress_pct"] = 10
+            sync_state["current_handle"] = targets[0]
+            sync_state["message"] = f"Syncing @{targets[0]}..."
+
+        if background:
+            thread = threading.Thread(
+                target=_run_sync_targets,
+                args=(targets, max_pages, post_ids),
+                name="x-tracker-sync",
+                daemon=True,
+            )
+            thread.start()
+            return True, None
+
+        return True, _run_sync_targets(targets, max_pages, post_ids)
 
     app = FastAPI(title="X Telemetry — Local-First X Analytics", version="1.0.0")
     app.state.db = db
@@ -109,12 +178,24 @@ def create_app(
             db.upsert_account(handle=norm, display_name=norm)
 
         sync_result = None
+        started = False
         if payload.sync:
-            res = fetcher.sync_handle(norm, post_ids=extracted_post_ids)
-            sync_result = res.model_dump()
+            started, results = _start_sync(
+                targets=[norm],
+                max_pages=15,
+                post_ids=extracted_post_ids,
+                background=payload.background,
+            )
+            if results:
+                sync_result = results[0]
 
         account = db.get_account(norm)
-        return {"account": account, "sync_result": sync_result}
+        return {
+            "account": account,
+            "started": started,
+            "sync_result": sync_result,
+            "status": dict(sync_state),
+        }
 
     @app.delete("/api/accounts/{handle}")
     def remove_account(handle: str) -> dict[str, Any]:
@@ -189,36 +270,22 @@ def create_app(
         if not targets:
             raise HTTPException(status_code=400, detail="No handles available to sync.")
 
-        with sync_lock:
-            sync_state["is_running"] = True
-            sync_state["progress_pct"] = 10
-            sync_state["current_handle"] = targets[0]
-            sync_state["message"] = f"Syncing @{targets[0]}..."
+        started, results = _start_sync(
+            targets=targets,
+            max_pages=payload.max_pages,
+            post_ids=payload.post_ids,
+            background=payload.background,
+        )
+        if payload.background:
+            return {
+                "started": started,
+                "already_running": not started,
+                "status": dict(sync_state),
+            }
 
-        results: list[dict[str, Any]] = []
-        try:
-            total = len(targets)
-            for idx, handle in enumerate(targets):
-                with sync_lock:
-                    sync_state["current_handle"] = handle
-                    sync_state["progress_pct"] = max(15, int(((idx) / total) * 90) + 10)
-                    sync_state["message"] = f"Fetching @{handle} ({idx + 1}/{total})..."
-                res = fetcher.sync_handle(
-                    handle, max_pages=payload.max_pages, post_ids=payload.post_ids
-                )
-                results.append(res.model_dump())
-        finally:
-            with sync_lock:
-                sync_state["is_running"] = False
-                sync_state["progress_pct"] = 100
-                sync_state["current_handle"] = None
-                sync_state["last_synced_at"] = utc_now_iso()
-                sync_state["last_result"] = results[0] if len(results) == 1 else results
-                sync_state["message"] = (
-                    f"Synced {len(results)} handle(s) at {sync_state['last_synced_at']}"
-                )
-
+        assert results is not None
         return {
+            "started": started,
             "result": results[0] if len(results) == 1 else None,
             "results": results,
             "status": dict(sync_state),
