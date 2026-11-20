@@ -561,23 +561,27 @@ class MultiSourceFetcher:
         # 2. Fallback: Twitter Syndication timeline
         if profile is None or not posts_by_id:
             fallback_chain.append("syndication")
-            try:
-                syn_resp = self.request_with_retry(
-                    "https://cdn.syndication.twimg.com/timeline/profile",
-                    params={"screen_name": norm},
-                )
-                if syn_resp.status_code == 200:
-                    syn_profile, syn_posts = self.parse_syndication_timeline(syn_resp.text, norm)
-                    if profile is None and syn_profile is not None:
-                        profile = syn_profile
-                    for p in syn_posts:
-                        posts_by_id.setdefault(p["post_id"], p)
-                    if (syn_profile or syn_posts) and source_used == "none":
-                        source_used = "syndication"
-                else:
-                    warnings.append(f"Syndication HTTP {syn_resp.status_code}")
-            except Exception as exc:
-                warnings.append(f"Syndication error: {exc}")
+            syn_endpoints = (
+                (f"https://cdn.syndication.twimg.com/srv/timeline-profile/screen-name/{norm}", None),
+                ("https://cdn.syndication.twimg.com/timeline/profile", {"screen_name": norm}),
+            )
+            for syn_url, syn_params in syn_endpoints:
+                try:
+                    syn_resp = self.request_with_retry(syn_url, params=syn_params)
+                    if syn_resp.status_code == 200 and syn_resp.text.strip():
+                        syn_profile, syn_posts = self.parse_syndication_timeline(syn_resp.text, norm)
+                        if profile is None and syn_profile is not None:
+                            profile = syn_profile
+                        for p in syn_posts:
+                            posts_by_id.setdefault(p["post_id"], p)
+                        if (syn_profile or syn_posts) and source_used == "none":
+                            source_used = "syndication"
+                        if syn_posts:
+                            break
+                    else:
+                        warnings.append(f"Syndication HTTP {syn_resp.status_code}")
+                except Exception as exc:
+                    warnings.append(f"Syndication error: {exc}")
 
         # 3. Fallback: Nitter RSS/JSON instances
         if not posts_by_id:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,25 @@ from x_tracker.analytics import (
     compute_virality_ratio,
 )
 from x_tracker.database import DEFAULT_DB_PATH, Database
-from x_tracker.fetcher import MultiSourceFetcher
+from x_tracker.fetcher import STATUS_URL_RE, MultiSourceFetcher
 from x_tracker.models import normalize_handle, utc_now_iso
 from x_tracker.scheduler import BackgroundSyncScheduler
-from x_tracker.seeder import seed_demo_data
+from x_tracker.seeder import DEMO_PROFILES, seed_demo_data
 
 STATIC_DIR = Path(__file__).parent / "static"
+PROFILE_URL_RE = re.compile(r"https?://(?:x\.com|twitter\.com)/@?([A-Za-z0-9_]{1,30})/?$", re.IGNORECASE)
+
+
+def _parse_handle_input(raw_input: str) -> tuple[str, list[str] | None]:
+    """Extract normalized handle and optional status ID from @handle, profile URL, or post URL."""
+    text = (raw_input or "").strip()
+    status_match = STATUS_URL_RE.search(text)
+    if status_match:
+        return normalize_handle(status_match.group(1)), [status_match.group(2)]
+    profile_match = PROFILE_URL_RE.match(text)
+    if profile_match:
+        return normalize_handle(profile_match.group(1)), None
+    return normalize_handle(text), None
 
 
 class AddAccountPayload(BaseModel):
@@ -86,9 +100,9 @@ def create_app(
 
     @app.post("/api/accounts")
     def add_account(payload: AddAccountPayload) -> dict[str, Any]:
-        norm = normalize_handle(payload.handle)
+        norm, extracted_post_ids = _parse_handle_input(payload.handle)
         if not norm:
-            raise HTTPException(status_code=400, detail="A valid handle is required.")
+            raise HTTPException(status_code=400, detail="A valid handle or X URL is required.")
 
         existing = db.get_account(norm)
         if existing is None:
@@ -96,7 +110,7 @@ def create_app(
 
         sync_result = None
         if payload.sync:
-            res = fetcher.sync_handle(norm)
+            res = fetcher.sync_handle(norm, post_ids=extracted_post_ids)
             sync_result = res.model_dump()
 
         account = db.get_account(norm)
@@ -108,6 +122,15 @@ def create_app(
         if not deleted:
             raise HTTPException(status_code=404, detail="Handle not found.")
         return {"deleted": True, "handle": normalize_handle(handle)}
+
+    @app.delete("/api/demo-data")
+    def purge_demo_data() -> dict[str, Any]:
+        removed: list[str] = []
+        for profile in DEMO_PROFILES:
+            h = profile["handle"]
+            if db.delete_account(h):
+                removed.append(h)
+        return {"deleted": removed, "count": len(removed)}
 
     @app.get("/api/analytics")
     def get_analytics(

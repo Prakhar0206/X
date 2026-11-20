@@ -119,3 +119,68 @@ def test_import_export_accounts_and_sync_endpoints(tmp_path: Path) -> None:
     del_resp = client.delete("/api/accounts/new_creator")
     assert del_resp.status_code == 200
     assert del_resp.json()["deleted"] is True
+
+
+def test_delete_demo_data_and_add_handle_by_url(tmp_path: Path) -> None:
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("api.fxtwitter.com/itsprakhar_"):
+            return httpx.Response(
+                200,
+                json={
+                    "user": {
+                        "screen_name": "itsprakhar_",
+                        "name": "Prakhar Aggarwal",
+                        "followers": 31,
+                        "following": 50,
+                        "tweets": 540,
+                    }
+                },
+            )
+        if "api.fxtwitter.com/itsprakhar_/status/999888" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "tweet": {
+                        "id": "999888",
+                        "text": "Testing single status URL sync!",
+                        "views": 420,
+                        "likes": 12,
+                        "replies": 2,
+                        "retweets": 1,
+                        "bookmarks": 3,
+                        "created_timestamp": 1795000000,
+                    }
+                },
+            )
+        return httpx.Response(404, json={"error": "not found"})
+
+    app = create_app(
+        db_path=str(tmp_path / "cleanup.db"),
+        transport=httpx.MockTransport(mock_handler),
+    )
+    client = TestClient(app)
+
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "inline-handle-input" in home.text
+    assert "btn-remove-handle" in home.text
+    assert "handle-chips-bar" in home.text
+
+    # Seed demo data then add a real handle via status URL
+    client.post("/api/seed-demo")
+    url_add = client.post(
+        "/api/accounts",
+        json={"handle": "https://x.com/itsprakhar_/status/999888", "sync": True},
+    )
+    assert url_add.status_code == 200
+    assert url_add.json()["account"]["handle"] == "itsprakhar_"
+    assert url_add.json()["sync_result"]["posts_synced"] == 1
+
+    # Delete all demo data while preserving real user handle
+    purge_resp = client.delete("/api/demo-data")
+    assert purge_resp.status_code == 200
+    assert purge_resp.json()["count"] == 3
+
+    remaining = [a["handle"] for a in client.get("/api/accounts").json()["accounts"]]
+    assert remaining == ["itsprakhar_"]

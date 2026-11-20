@@ -118,6 +118,8 @@ a:focus-visible {
 .controls-cluster,
 .actions-cluster,
 .handle-group,
+.inline-add-form,
+.handle-switch-group,
 .export-group,
 .custom-date-bar {
   display: flex;
@@ -128,6 +130,7 @@ a:focus-visible {
 
 .telemetry-select,
 .telemetry-input,
+.telemetry-input-handle,
 .telemetry-input-sm {
   background: var(--bg-panel);
   color: var(--text-primary);
@@ -140,6 +143,12 @@ a:focus-visible {
 
 .telemetry-input {
   min-width: 210px;
+}
+
+.telemetry-input-handle {
+  width: 190px;
+  padding: 6px 10px;
+  font-size: 12.5px;
 }
 
 .telemetry-input-sm {
@@ -222,6 +231,78 @@ a:focus-visible {
 .btn-ghost:hover {
   border-color: var(--border-hover);
   background: var(--bg-elevated);
+}
+
+.btn-danger-ghost {
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.btn-danger-ghost:hover {
+  border-color: rgba(244, 63, 94, 0.6);
+  background: var(--delta-neg-bg);
+  color: var(--delta-neg);
+}
+
+.handle-chips-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.handle-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  overflow: hidden;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.handle-chip.active {
+  border-color: var(--accent-signal);
+  background: var(--accent-signal-dim);
+}
+
+.chip-select-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 8px 5px 12px;
+  cursor: pointer;
+}
+
+.handle-chip.active .chip-select-btn {
+  color: var(--accent-signal);
+}
+
+.chip-remove-btn {
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(36, 48, 68, 0.7);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.chip-remove-btn:hover {
+  color: var(--delta-neg);
+  background: var(--delta-neg-bg);
 }
 
 .btn-icon {
@@ -331,7 +412,7 @@ a:focus-visible {
   color: var(--text-secondary);
 }
 
-.empty-actions {
+.empty-add-form {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;

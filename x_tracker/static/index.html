@@ -24,13 +24,20 @@
       </div>
 
       <div class="controls-cluster">
-        <!-- Handle Switcher -->
+        <!-- Inline Add / Switch / Remove Handle -->
         <div class="handle-group">
-          <label for="handle-select" class="sr-only">Tracked Handle</label>
-          <select id="handle-select" class="telemetry-select" aria-label="Tracked X handle"></select>
-          <button id="btn-open-add-handle" type="button" class="btn-ghost" title="Track a new @handle">
-            + Handle
-          </button>
+          <form id="inline-add-form" class="inline-add-form">
+            <label for="inline-handle-input" class="sr-only">Add X Handle or Post URL</label>
+            <input id="inline-handle-input" type="text" class="telemetry-input-handle" placeholder="Add @handle or X URL..." required />
+            <button id="btn-add-handle" type="submit" class="btn-primary">+ Add</button>
+          </form>
+          <div class="handle-switch-group">
+            <label for="handle-select" class="sr-only">Tracked Handle</label>
+            <select id="handle-select" class="telemetry-select" aria-label="Tracked X handle"></select>
+            <button id="btn-remove-handle" type="button" class="btn-danger-ghost" title="Remove active handle">
+              Remove
+            </button>
+          </div>
         </div>
 
         <!-- Cohort vs Velocity Toggle -->
@@ -88,16 +95,20 @@
     <!-- Toast Banner -->
     <div id="toast-banner" class="toast-banner hidden" role="status" aria-live="polite"></div>
 
+    <!-- Tracked Handles Quick-Switch & Remove Chips -->
+    <div id="handle-chips-bar" class="handle-chips-bar hidden" aria-label="Tracked handles"></div>
+
     <!-- Empty State -->
     <section id="empty-state" class="panel-card empty-state hidden">
       <div class="empty-state-content">
-        <h2>No tracked handles in SQLite yet</h2>
-        <p>Add an X handle to fetch live snapshots, import an official X Analytics CSV/archive JSON, or populate 120 days of sample telemetry data to explore every window.</p>
-        <div class="empty-actions">
-          <button id="btn-empty-seed" type="button" class="btn-primary">Load 120-Day Demo Data</button>
-          <button id="btn-empty-add" type="button" class="btn-ghost">Track @Handle</button>
+        <h2>Track your first X handle</h2>
+        <p>Enter any X handle (or paste a post URL) to start tracking profile snapshots and impressions locally, or import an official X Analytics CSV / JSON export.</p>
+        <form id="empty-add-form" class="empty-add-form">
+          <label for="empty-handle-input" class="sr-only">X Handle</label>
+          <input id="empty-handle-input" type="text" class="telemetry-input" placeholder="Enter @handle (e.g. @itsprakhar_)" required />
+          <button type="submit" class="btn-primary">Track Handle</button>
           <button id="btn-empty-import" type="button" class="btn-ghost">Import CSV / JSON</button>
-        </div>
+        </form>
       </div>
     </section>
 
@@ -324,28 +335,6 @@
       </section>
     </div>
   </main>
-
-  <!-- Add Handle Modal -->
-  <div id="add-handle-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 id="modal-title" class="panel-title">Track X Handle</h3>
-        <button id="btn-close-modal" type="button" class="btn-icon" aria-label="Close modal">&times;</button>
-      </div>
-      <form id="add-handle-form" class="modal-form">
-        <label class="field-label" for="new-handle-input">X Handle</label>
-        <input id="new-handle-input" type="text" class="telemetry-input" placeholder="@alexrivera_dev" required />
-        <label class="checkbox-row">
-          <input id="new-handle-sync-check" type="checkbox" checked />
-          <span>Immediately attempt live multi-source sync</span>
-        </label>
-        <div class="modal-actions">
-          <button type="button" id="btn-cancel-modal" class="btn-ghost">Cancel</button>
-          <button type="submit" class="btn-primary">Add Handle</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <!-- Post Detail Slide-Over Drawer -->
   <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>

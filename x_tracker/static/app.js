@@ -81,19 +81,62 @@
     return payload;
   }
 
+  function renderHandleChips(accounts) {
+    const bar = $("handle-chips-bar");
+    bar.innerHTML = "";
+    if (!accounts.length) {
+      bar.classList.add("hidden");
+      return;
+    }
+    bar.classList.remove("hidden");
+
+    for (const acc of accounts) {
+      const chip = document.createElement("div");
+      chip.className = `handle-chip ${acc.handle === state.handle ? "active" : ""}`;
+
+      const selectBtn = document.createElement("button");
+      selectBtn.type = "button";
+      selectBtn.className = "chip-select-btn";
+      selectBtn.textContent = `@${acc.handle}`;
+      selectBtn.title = `Switch to @${acc.handle}`;
+      selectBtn.addEventListener("click", async () => {
+        if (state.handle === acc.handle) return;
+        state.handle = acc.handle;
+        $("handle-select").value = acc.handle;
+        renderHandleChips(accounts);
+        await refreshDashboard();
+      });
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "chip-remove-btn";
+      removeBtn.textContent = "×";
+      removeBtn.title = `Remove @${acc.handle}`;
+      removeBtn.setAttribute("aria-label", `Remove @${acc.handle}`);
+      removeBtn.addEventListener("click", () => removeHandle(acc.handle));
+
+      chip.append(selectBtn, removeBtn);
+      bar.appendChild(chip);
+    }
+  }
+
   async function loadAccounts(preferredHandle = null) {
     const data = await apiJson("/api/accounts");
     const accounts = data.accounts || [];
     const select = $("handle-select");
+    const switchGroup = select.closest(".handle-switch-group");
     select.innerHTML = "";
 
     if (!accounts.length) {
       state.handle = "";
+      if (switchGroup) switchGroup.classList.add("hidden");
+      renderHandleChips([]);
       $("empty-state").classList.remove("hidden");
       $("dashboard-content").classList.add("hidden");
       return false;
     }
 
+    if (switchGroup) switchGroup.classList.remove("hidden");
     $("empty-state").classList.add("hidden");
     $("dashboard-content").classList.remove("hidden");
 
@@ -111,7 +154,52 @@
       state.handle = accounts[0].handle;
     }
     select.value = state.handle;
+    renderHandleChips(accounts);
     return true;
+  }
+
+  async function addHandle(rawInput, inputEl = null) {
+    const val = (rawInput || "").trim();
+    if (!val) return;
+    try {
+      const res = await apiJson("/api/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: val, sync: true }),
+      });
+      const createdHandle = res.account?.handle;
+      if (inputEl) inputEl.value = "";
+      const syncedPosts = res.sync_result?.posts_synced || 0;
+      showToast(
+        syncedPosts > 0
+          ? `Added @${createdHandle} and synced ${syncedPosts} post(s).`
+          : `Added @${createdHandle} to tracked handles.`
+      );
+      await loadAccounts(createdHandle);
+      await refreshDashboard();
+    } catch (err) {
+      showToast(`Could not add handle: ${err.message}`, true);
+    }
+  }
+
+  async function removeHandle(handle) {
+    const target = (handle || "").trim();
+    if (!target) return;
+    try {
+      await apiJson(`/api/accounts/${encodeURIComponent(target)}`, {
+        method: "DELETE",
+      });
+      showToast(`Removed @${target}.`);
+      if (state.handle === target) {
+        state.handle = "";
+      }
+      const hasAccounts = await loadAccounts();
+      if (hasAccounts) {
+        await refreshDashboard();
+      }
+    } catch (err) {
+      showToast(`Could not remove @${target}: ${err.message}`, true);
+    }
   }
 
   async function refreshDashboard() {
@@ -745,7 +833,26 @@
   function wireEvents() {
     $("handle-select").addEventListener("change", async (e) => {
       state.handle = e.target.value;
+      await loadAccounts(state.handle);
       await refreshDashboard();
+    });
+
+    $("inline-add-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = $("inline-handle-input");
+      await addHandle(input.value, input);
+    });
+
+    $("empty-add-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = $("empty-handle-input");
+      await addHandle(input.value, input);
+    });
+
+    $("btn-remove-handle").addEventListener("click", async () => {
+      if (state.handle) {
+        await removeHandle(state.handle);
+      }
     });
 
     document.querySelectorAll("[data-mode]").forEach((btn) => {
@@ -844,59 +951,11 @@
       window.location.href = `/api/export?handle=${encodeURIComponent(state.handle)}&format=json`;
     });
 
-    // Add handle modal
-    const openModal = () => {
-      $("add-handle-modal").classList.remove("hidden");
-      $("new-handle-input").focus();
-    };
-    const closeModal = () => $("add-handle-modal").classList.add("hidden");
-
-    $("btn-open-add-handle").addEventListener("click", openModal);
-    $("btn-empty-add").addEventListener("click", openModal);
-    $("btn-close-modal").addEventListener("click", closeModal);
-    $("btn-cancel-modal").addEventListener("click", closeModal);
-
-    $("add-handle-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const handleVal = $("new-handle-input").value.trim();
-      const doSync = $("new-handle-sync-check").checked;
-      if (!handleVal) return;
-      closeModal();
-      try {
-        const res = await apiJson("/api/accounts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ handle: handleVal, sync: doSync }),
-        });
-        const createdHandle = res.account?.handle;
-        $("new-handle-input").value = "";
-        showToast(`Added @${createdHandle} to tracked handles.`);
-        await loadAccounts(createdHandle);
-        await refreshDashboard();
-      } catch (err) {
-        showToast(`Could not add handle: ${err.message}`, true);
-      }
-    });
-
-    $("btn-empty-seed").addEventListener("click", async () => {
-      try {
-        const res = await apiJson("/api/seed-demo", { method: "POST" });
-        showToast(
-          `Seeded ${res.accounts_seeded} handles and ${res.posts_seeded} posts across 120 days.`
-        );
-        await loadAccounts();
-        await refreshDashboard();
-      } catch (err) {
-        showToast(`Demo seed failed: ${err.message}`, true);
-      }
-    });
-
     $("btn-close-drawer").addEventListener("click", closePostDrawer);
     $("drawer-backdrop").addEventListener("click", closePostDrawer);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         closePostDrawer();
-        closeModal();
       }
     });
   }
