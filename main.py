@@ -146,8 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ != "__main__":
-    app = create_app()
+# Expose top-level ASGI `app` directly at global module scope for Vercel / Uvicorn
+app = create_app()
 
 
 if __name__ == "__main__":
