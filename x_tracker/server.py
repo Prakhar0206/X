@@ -26,7 +26,7 @@ from x_tracker.models import normalize_handle, utc_now_iso
 from x_tracker.scheduler import BackgroundSyncScheduler
 from x_tracker.seeder import DEMO_PROFILES, seed_demo_data
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 PROFILE_URL_RE = re.compile(r"https?://(?:x\.com|twitter\.com)/@?([A-Za-z0-9_]{1,30})/?$", re.IGNORECASE)
 
 
