@@ -42,7 +42,7 @@ python main.py --watch --interval 6h --no-server
 
 ## Deploy on Vercel
 
-This repository is pre-configured for zero-config deployment on Vercel via [api/index.py](api/index.py) and [vercel.json](vercel.json):
+This repository is pre-configured for zero-config deployment on Vercel's **FastAPI** preset via [main.py](main.py) (`app = create_app()`) and [vercel.json](vercel.json):
 
 1. Import **`https://github.com/Prakhar0206/X`** in your Vercel dashboard.
 2. Keep the default **Framework Preset: Other** (or **FastAPI**) and click **Deploy**.

@@ -218,18 +218,17 @@ def test_vercel_entrypoint_and_temp_db_path(monkeypatch, tmp_path: Path) -> None
     assert db_mod.IS_VERCEL is True
     assert db_mod.get_default_db_path() == expected_tmp
 
-    # Ensure Vercel entrypoint imports cleanly and serves dashboard HTML
+    # Ensure Vercel FastAPI entrypoint (main:app) imports cleanly and serves routes
     monkeypatch.setenv("X_TRACKER_DB", str(tmp_path / "vercel_test.db"))
-    import api.index as vercel_index
     import main as root_main
 
-    importlib.reload(vercel_index)
     importlib.reload(root_main)
     assert hasattr(root_main, "app")
-    client = TestClient(vercel_index.app)
+    client = TestClient(root_main.app)
     resp = client.get("/")
     assert resp.status_code == 200
     assert "X Telemetry" in resp.text
+    assert client.get("/api/accounts").status_code == 200
 
     # Restore non-Vercel default module state
     monkeypatch.delenv("VERCEL", raising=False)
