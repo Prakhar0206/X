@@ -40,6 +40,14 @@ python main.py --import-file path/to/tweet_activity.csv --handle @alexrivera_dev
 python main.py --watch --interval 6h --no-server
 ```
 
+## Deploy on Vercel
+
+This repository is pre-configured for zero-config deployment on Vercel via [api/index.py](api/index.py) and [vercel.json](vercel.json):
+
+1. Import **`https://github.com/Prakhar0206/X`** in your Vercel dashboard.
+2. Keep the default **Framework Preset: Other** (or **FastAPI**) and click **Deploy**.
+3. On Vercel, SQLite runs inside the writable `/tmp/x_analytics.db` directory (override with `X_TRACKER_DB` if needed), sync runs inline within serverless request execution, and tracked handles/snapshots automatically back up and restore via browser `localStorage` across serverless cold starts.
+
 ## Running Tests
 
 ```bash

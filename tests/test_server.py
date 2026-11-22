@@ -202,3 +202,33 @@ def test_delete_demo_data_and_add_handle_by_url(tmp_path: Path) -> None:
     assert final_st["is_running"] is False
     assert final_st["progress_pct"] == 100
     assert final_st["last_result"]["profile_updated"] is True
+
+
+def test_vercel_entrypoint_and_temp_db_path(monkeypatch, tmp_path: Path) -> None:
+    import importlib
+    import tempfile
+
+    import x_tracker.database as db_mod
+
+    monkeypatch.delenv("X_TRACKER_DB", raising=False)
+    monkeypatch.setenv("VERCEL", "1")
+    importlib.reload(db_mod)
+
+    expected_tmp = str(Path(tempfile.gettempdir()) / "x_analytics.db")
+    assert db_mod.IS_VERCEL is True
+    assert db_mod.get_default_db_path() == expected_tmp
+
+    # Ensure Vercel entrypoint imports cleanly and serves dashboard HTML
+    monkeypatch.setenv("X_TRACKER_DB", str(tmp_path / "vercel_test.db"))
+    import api.index as vercel_index
+
+    importlib.reload(vercel_index)
+    client = TestClient(vercel_index.app)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "X Telemetry" in resp.text
+
+    # Restore non-Vercel default module state
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.delenv("X_TRACKER_DB", raising=False)
+    importlib.reload(db_mod)

@@ -9,6 +9,66 @@
   };
 
   const DEFAULT_HEATMAP_READOUT = "Hover a cell to inspect slot";
+  const BACKUP_STORAGE_KEY = "x_telemetry_backup_v1";
+
+  function readLocalBackup() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(BACKUP_STORAGE_KEY) || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function writeLocalBackup(data) {
+    try {
+      window.localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(data || {}));
+    } catch (_) {}
+  }
+
+  async function backupHandleToLocal(handle) {
+    const clean = (handle || "").trim().toLowerCase();
+    if (!clean) return;
+    try {
+      const bundle = await apiJson(`/api/export?handle=${encodeURIComponent(clean)}&format=json`);
+      const backup = readLocalBackup();
+      backup[clean] = bundle;
+      writeLocalBackup(backup);
+    } catch (_) {}
+  }
+
+  function removeHandleFromLocal(handle) {
+    const clean = (handle || "").trim().toLowerCase();
+    if (!clean) return;
+    const backup = readLocalBackup();
+    if (Object.prototype.hasOwnProperty.call(backup, clean)) {
+      delete backup[clean];
+      writeLocalBackup(backup);
+    }
+  }
+
+  async function restoreFromLocalBackupIfNeeded() {
+    const backup = readLocalBackup();
+    const entries = Object.entries(backup);
+    if (!entries.length) return false;
+    let restoredAny = false;
+    for (const [handle, bundle] of entries) {
+      if (!bundle || typeof bundle !== "object") continue;
+      try {
+        await apiJson("/api/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            format: "json",
+            handle,
+            content: JSON.stringify(bundle),
+          }),
+        });
+        restoredAny = true;
+      } catch (_) {}
+    }
+    return restoredAny;
+  }
 
   const state = {
     handle: "",
@@ -339,9 +399,14 @@
       await loadAccounts(createdHandle);
       await refreshDashboard();
 
-      const finalStatus = await pollSyncUntilDone(fill, text, createdHandle);
+      let lastRes = res.sync_result;
+      if (!lastRes && res.status && res.status.is_running) {
+        const finalStatus = await pollSyncUntilDone(fill, text, createdHandle);
+        lastRes = finalStatus.last_result || {};
+      } else {
+        lastRes = lastRes || res.status?.last_result || {};
+      }
       if (fill) fill.style.width = "100%";
-      const lastRes = finalStatus.last_result || {};
       const syncedPosts = lastRes.posts_synced || 0;
       const src = lastRes.source_used || "none";
       showToast(
@@ -351,6 +416,7 @@
       );
       await loadAccounts(createdHandle);
       await refreshDashboard();
+      await backupHandleToLocal(createdHandle);
     } catch (err) {
       showToast(`Could not add handle: ${err.message}`, true);
     } finally {
@@ -366,6 +432,7 @@
       await apiJson(`/api/accounts/${encodeURIComponent(target)}`, {
         method: "DELETE",
       });
+      removeHandleFromLocal(target);
       showToast(`Removed @${target}.`);
       if (state.handle === target) {
         state.handle = "";
@@ -1097,16 +1164,21 @@
     if (text) text.textContent = `Fetching @${state.handle} via FxTwitter v2...`;
 
     try {
-      await apiJson("/api/sync", {
+      const resp = await apiJson("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ handle: state.handle, background: true }),
       });
-      const finalStatus = await pollSyncUntilDone(fill, text, state.handle);
+      let res = resp.result;
+      if (!res && resp.status && resp.status.is_running) {
+        const finalStatus = await pollSyncUntilDone(fill, text, state.handle);
+        res = Array.isArray(finalStatus.last_result)
+          ? finalStatus.last_result[0] || {}
+          : finalStatus.last_result || {};
+      } else {
+        res = res || resp.status?.last_result || {};
+      }
       if (fill) fill.style.width = "100%";
-      const res = Array.isArray(finalStatus.last_result)
-        ? finalStatus.last_result[0] || {}
-        : finalStatus.last_result || {};
       if (res.success) {
         showToast(
           `Synced @${state.handle} via ${res.source_used}: ${res.posts_synced} post(s), ${res.snapshots_recorded} snapshot(s).`
@@ -1119,6 +1191,7 @@
       }
       await loadAccounts(state.handle);
       await refreshDashboard();
+      await backupHandleToLocal(state.handle);
     } catch (err) {
       showToast(`Sync failed: ${err.message}`, true);
     } finally {
@@ -1146,6 +1219,7 @@
       closeMobileSidebar();
       await loadAccounts(res.handle);
       await refreshDashboard();
+      await backupHandleToLocal(res.handle);
     } catch (err) {
       showToast(`Import failed: ${err.message}`, true);
     }
@@ -1357,7 +1431,16 @@
     wireEvents();
     applyView(state.view);
     try {
-      const hasAccounts = await loadAccounts();
+      let hasAccounts = await loadAccounts();
+      if (!hasAccounts) {
+        const restored = await restoreFromLocalBackupIfNeeded();
+        if (restored) {
+          hasAccounts = await loadAccounts();
+          if (hasAccounts) {
+            showToast("Restored tracked handles from browser backup.");
+          }
+        }
+      }
       if (hasAccounts) {
         await refreshDashboard();
       }

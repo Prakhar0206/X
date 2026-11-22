@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import tempfile
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -17,7 +18,20 @@ from x_tracker.models import (
     utc_now_iso,
 )
 
-DEFAULT_DB_PATH = os.environ.get("X_TRACKER_DB", "x_analytics.db")
+IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"))
+
+
+def get_default_db_path() -> str:
+    """Resolve the default SQLite path (uses /tmp on Vercel serverless runtime)."""
+    env_path = os.environ.get("X_TRACKER_DB")
+    if env_path:
+        return env_path
+    if IS_VERCEL:
+        return str(Path(tempfile.gettempdir()) / "x_analytics.db")
+    return "x_analytics.db"
+
+
+DEFAULT_DB_PATH = get_default_db_path()
 
 MIGRATIONS: list[tuple[int, str, str]] = [
     (
@@ -152,7 +166,10 @@ class Database:
     def init_db(self) -> None:
         """Initialize WAL mode and run any pending schema migrations."""
         with self.connect() as conn:
-            conn.execute("PRAGMA journal_mode = WAL;")
+            try:
+                conn.execute("PRAGMA journal_mode = WAL;")
+            except sqlite3.OperationalError:
+                pass
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (

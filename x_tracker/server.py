@@ -20,7 +20,7 @@ from x_tracker.analytics import (
     compute_high_signal_score,
     compute_virality_ratio,
 )
-from x_tracker.database import DEFAULT_DB_PATH, Database
+from x_tracker.database import IS_VERCEL, Database, get_default_db_path
 from x_tracker.fetcher import STATUS_URL_RE, MultiSourceFetcher
 from x_tracker.models import normalize_handle, utc_now_iso
 from x_tracker.scheduler import BackgroundSyncScheduler
@@ -61,12 +61,15 @@ def create_app(
     scheduler: BackgroundSyncScheduler | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application with local SQLite persistence."""
-    resolved_db = Path(db_path) if db_path is not None else Path(DEFAULT_DB_PATH)
+    resolved_db = Path(db_path) if db_path is not None else Path(get_default_db_path())
     db = Database(resolved_db)
     db.init_db()
 
     fetcher = MultiSourceFetcher(
         db=db,
+        timeout=6.0 if IS_VERCEL else 10.0,
+        max_retries=2 if IS_VERCEL else 3,
+        base_backoff=0.25 if IS_VERCEL else 0.5,
         transport=transport,
         sleep_fn=(lambda _: None) if transport is not None else __import__("time").sleep,
     )
@@ -126,25 +129,28 @@ def create_app(
         post_ids: list[str] | None,
         background: bool,
     ) -> tuple[bool, list[dict[str, Any]] | None]:
+        effective_background = background and not IS_VERCEL
+        effective_max_pages = min(max_pages, 5) if IS_VERCEL else max_pages
+
         with sync_lock:
-            if background and sync_state["is_running"]:
+            if effective_background and sync_state["is_running"]:
                 return False, None
             sync_state["is_running"] = True
             sync_state["progress_pct"] = 10
             sync_state["current_handle"] = targets[0]
             sync_state["message"] = f"Syncing @{targets[0]}..."
 
-        if background:
+        if effective_background:
             thread = threading.Thread(
                 target=_run_sync_targets,
-                args=(targets, max_pages, post_ids),
+                args=(targets, effective_max_pages, post_ids),
                 name="x-tracker-sync",
                 daemon=True,
             )
             thread.start()
             return True, None
 
-        return True, _run_sync_targets(targets, max_pages, post_ids)
+        return True, _run_sync_targets(targets, effective_max_pages, post_ids)
 
     app = FastAPI(title="X Telemetry — Local-First X Analytics", version="1.0.0")
     app.state.db = db
@@ -276,16 +282,16 @@ def create_app(
             post_ids=payload.post_ids,
             background=payload.background,
         )
-        if payload.background:
+        if results is None:
             return {
                 "started": started,
                 "already_running": not started,
                 "status": dict(sync_state),
             }
 
-        assert results is not None
         return {
             "started": started,
+            "completed": True,
             "result": results[0] if len(results) == 1 else None,
             "results": results,
             "status": dict(sync_state),
