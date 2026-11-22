@@ -221,8 +221,11 @@ def test_vercel_entrypoint_and_temp_db_path(monkeypatch, tmp_path: Path) -> None
     # Ensure Vercel entrypoint imports cleanly and serves dashboard HTML
     monkeypatch.setenv("X_TRACKER_DB", str(tmp_path / "vercel_test.db"))
     import api.index as vercel_index
+    import main as root_main
 
     importlib.reload(vercel_index)
+    importlib.reload(root_main)
+    assert hasattr(root_main, "app")
     client = TestClient(vercel_index.app)
     resp = client.get("/")
     assert resp.status_code == 200
